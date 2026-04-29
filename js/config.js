@@ -2,7 +2,7 @@
    설정 & 정적 데이터
 ================================================================ */
 
-export const SERVER = 'https://lumane-server.onrender.com';
+export const SERVER = 'https://port-0-lumane-cloudtype-mojs7tod1c6ae3f9.sel3.cloudtype.app';
 
 /* ── 데모 스크립트 (서버 없을 때 순차 재생) ── */
 export const DEMO = [
