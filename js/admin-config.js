@@ -3,7 +3,7 @@
 ================================================================ */
 
 // 서버 주소
-const SERVER = 'https://lumane-server.onrender.com';
+const SERVER = 'https://port-0-lumane-cloudtype-mojs7tod1c6ae3f9.sel3.cloudtype.app';
 
 // Admin API 인증 토큰 — server.js .env의 ADMIN_TOKEN 값과 일치해야 합니다
 const ADMIN_TOKEN = '423920d58ecc5da3986baaa5580e8d90933ef98544cddbd9e497066af1967e7b';
