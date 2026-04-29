@@ -1,0 +1,862 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>관리자 — 케이트블랑 드레스룸</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --gold: #c9a96e;
+      --gold-light: #e8d9bc;
+      --gold-dark: #a8883f;
+      --bg: #faf9f7;
+      --border: #e4ddd2;
+      --text: #2c2820;
+      --text-sub: #6b6056;
+      --radius: 10px;
+      --shadow: 0 2px 12px rgba(0,0,0,.08);
+    }
+    body {
+      font-family: 'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont,
+                   'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+
+    /* 로그인 화면 */
+    #login-screen {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(135deg, #faf9f7 0%, #f4f1ec 100%);
+    }
+    .login-card {
+      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 44px 36px;
+      width: 360px;
+      box-shadow: var(--shadow);
+      text-align: center;
+    }
+    .login-logo {
+      font-size: 20px;
+      font-weight: 800;
+      color: var(--text);
+      margin-bottom: 6px;
+    }
+    .login-sub { font-size: 13px; color: var(--text-sub); margin-bottom: 32px; }
+    .login-card input[type="password"] {
+      width: 100%;
+      padding: 12px 14px;
+      border: 1.5px solid var(--border);
+      border-radius: var(--radius);
+      font-size: 15px;
+      outline: none;
+      margin-bottom: 12px;
+      font-family: inherit;
+      transition: border-color .2s;
+    }
+    .login-card input:focus { border-color: var(--gold); }
+    .login-btn {
+      width: 100%;
+      padding: 13px;
+      background: var(--gold);
+      color: #fff;
+      border: none;
+      border-radius: var(--radius);
+      font-size: 15px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: background .2s;
+      font-family: inherit;
+    }
+    .login-btn:hover { background: var(--gold-dark); }
+    .login-error {
+      font-size: 13px;
+      color: #e53e3e;
+      margin-top: 10px;
+      min-height: 20px;
+    }
+
+    /* 관리자 화면 */
+    #admin-screen { display: none; }
+
+    /* 헤더 */
+    .admin-header {
+      background: #fff;
+      border-bottom: 1px solid var(--border);
+      padding: 0 24px;
+      height: 60px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      box-shadow: 0 1px 6px rgba(0,0,0,.04);
+    }
+    .admin-logo { font-size: 16px; font-weight: 800; }
+    .admin-logo span { color: var(--gold-dark); font-size: 12px; margin-left: 8px; font-weight: 500; }
+    .logout-btn {
+      background: none;
+      border: 1.5px solid var(--border);
+      border-radius: 8px;
+      padding: 6px 14px;
+      font-size: 13px;
+      cursor: pointer;
+      color: var(--text-sub);
+      transition: all .2s;
+      font-family: inherit;
+    }
+    .logout-btn:hover { border-color: var(--gold); color: var(--gold-dark); }
+
+    /* 메인 콘텐츠 */
+    .admin-main {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 28px 20px;
+    }
+    .admin-title {
+      font-size: 22px;
+      font-weight: 800;
+      margin-bottom: 6px;
+    }
+    .admin-desc { font-size: 14px; color: var(--text-sub); margin-bottom: 24px; }
+
+    /* 통계 카드 */
+    .stats-row {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 14px;
+      margin-bottom: 28px;
+    }
+    .stat-card {
+      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 18px 20px;
+    }
+    .stat-card .s-label { font-size: 12px; color: var(--text-sub); margin-bottom: 6px; }
+    .stat-card .s-num {
+      font-size: 28px;
+      font-weight: 800;
+      color: var(--text);
+    }
+    .stat-card .s-num.gold { color: var(--gold-dark); }
+
+    /* 컨트롤 바 */
+    .control-bar {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+    }
+    .search-input {
+      flex: 1;
+      min-width: 180px;
+      padding: 9px 14px;
+      border: 1.5px solid var(--border);
+      border-radius: var(--radius);
+      font-size: 14px;
+      outline: none;
+      font-family: inherit;
+      transition: border-color .2s;
+    }
+    .search-input:focus { border-color: var(--gold); }
+    .filter-select {
+      padding: 9px 14px;
+      border: 1.5px solid var(--border);
+      border-radius: var(--radius);
+      font-size: 14px;
+      outline: none;
+      font-family: inherit;
+      background: #fff;
+      cursor: pointer;
+      color: var(--text);
+    }
+    .refresh-btn {
+      padding: 9px 16px;
+      background: var(--gold-light);
+      color: var(--gold-dark);
+      border: 1.5px solid var(--gold-light);
+      border-radius: var(--radius);
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all .2s;
+      font-family: inherit;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .refresh-btn:hover { background: var(--gold); color: #fff; border-color: var(--gold); }
+
+    /* 테이블 */
+    .table-wrap {
+      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      box-shadow: var(--shadow);
+    }
+    .table-loading {
+      text-align: center;
+      padding: 48px;
+      color: var(--text-sub);
+      font-size: 14px;
+    }
+    .table-loading i { font-size: 24px; color: var(--gold); display: block; margin-bottom: 10px; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    thead tr { background: #faf9f7; }
+    th {
+      text-align: left;
+      padding: 12px 14px;
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--text-sub);
+      text-transform: uppercase;
+      letter-spacing: .04em;
+      border-bottom: 1px solid var(--border);
+      white-space: nowrap;
+    }
+    td {
+      padding: 13px 14px;
+      font-size: 13px;
+      color: var(--text);
+      border-bottom: 1px solid #f4f1ec;
+      vertical-align: top;
+    }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: #fdfcfa; }
+
+    .status-badge {
+      display: inline-block;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 3px 9px;
+      border-radius: 12px;
+    }
+    .status-접수 { background: #fef3e2; color: #b45309; }
+    .status-검토중 { background: #e0f2fe; color: #0369a1; }
+    .status-완료  { background: #f0fdf4; color: #166534; }
+
+    .options-tags { display: flex; flex-wrap: wrap; gap: 4px; max-width: 200px; }
+    .opt-tag {
+      font-size: 10px;
+      background: var(--gold-light);
+      color: var(--gold-dark);
+      padding: 2px 7px;
+      border-radius: 8px;
+      white-space: nowrap;
+    }
+
+    .action-btn {
+      background: none;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 4px 10px;
+      font-size: 12px;
+      cursor: pointer;
+      margin-right: 4px;
+      font-family: inherit;
+      transition: all .2s;
+      color: var(--text-sub);
+    }
+    .action-btn:hover { border-color: var(--gold); color: var(--gold-dark); }
+    .action-btn.del:hover { border-color: #e53e3e; color: #e53e3e; }
+
+    /* 상세 모달 */
+    .detail-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,.5);
+      z-index: 500;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    .detail-overlay.open { display: flex; }
+    .detail-modal {
+      background: #fff;
+      border-radius: 16px;
+      max-width: 560px;
+      width: 100%;
+      max-height: 85vh;
+      overflow-y: auto;
+      padding: 28px;
+      position: relative;
+      animation: fadeIn .18s ease;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: scale(.97); }
+      to   { opacity: 1; transform: scale(1); }
+    }
+    .detail-close {
+      position: absolute;
+      top: 16px; right: 16px;
+      background: #f4f1ec;
+      border: none;
+      border-radius: 50%;
+      width: 30px; height: 30px;
+      display: flex; align-items: center; justify-content: center;
+      cursor: pointer;
+      font-size: 13px;
+      color: var(--text-sub);
+      transition: background .2s;
+    }
+    .detail-close:hover { background: var(--gold-light); color: var(--gold-dark); }
+    .detail-modal h3 { font-size: 17px; font-weight: 800; margin-bottom: 18px; }
+    .detail-row { display: flex; gap: 12px; margin-bottom: 12px; align-items: flex-start; }
+    .detail-label {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--text-sub);
+      min-width: 80px;
+      padding-top: 1px;
+    }
+    .detail-val { font-size: 14px; color: var(--text); flex: 1; line-height: 1.6; }
+    .detail-divider { height: 1px; background: var(--border); margin: 16px 0; }
+
+    .status-select {
+      padding: 6px 10px;
+      border: 1.5px solid var(--border);
+      border-radius: 8px;
+      font-size: 13px;
+      font-family: inherit;
+      outline: none;
+      cursor: pointer;
+      background: #fff;
+    }
+    .status-select:focus { border-color: var(--gold); }
+
+    /* 페이지네이션 */
+    .pagination {
+      display: flex;
+      gap: 6px;
+      justify-content: center;
+      padding: 18px;
+      align-items: center;
+    }
+    .page-btn {
+      width: 34px; height: 34px;
+      border: 1.5px solid var(--border);
+      border-radius: 8px;
+      background: #fff;
+      font-size: 13px;
+      cursor: pointer;
+      font-family: inherit;
+      color: var(--text-sub);
+      transition: all .2s;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .page-btn:hover { border-color: var(--gold); color: var(--gold-dark); }
+    .page-btn.active { background: var(--gold); border-color: var(--gold); color: #fff; font-weight: 700; }
+    .page-btn:disabled { opacity: .4; cursor: default; }
+
+    /* 빈 상태 */
+    .empty-state { text-align: center; padding: 60px 20px; color: var(--text-sub); }
+    .empty-state i { font-size: 36px; color: var(--gold-light); margin-bottom: 12px; display: block; }
+    .empty-state p { font-size: 14px; }
+
+    /* 반응형 */
+    @media (max-width: 768px) {
+      .admin-main { padding: 20px 14px; }
+      .hide-mobile { display: none; }
+      td, th { padding: 10px 10px; font-size: 12px; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ── 로그인 화면 ── -->
+  <div id="login-screen">
+    <div class="login-card">
+      <div class="login-logo">케이트블랑 드레스룸</div>
+      <p class="login-sub">관리자 페이지</p>
+      <form onsubmit="doLogin(); return false;" autocomplete="current-password">
+        <input type="password" id="admin-pw" placeholder="비밀번호를 입력하세요"
+               autocomplete="current-password" />
+        <button type="submit" class="login-btn">
+          <i class="fas fa-lock-open" style="margin-right:6px;"></i>로그인
+        </button>
+      </form>
+      <div class="login-error" id="login-error"></div>
+    </div>
+  </div>
+
+  <!-- ── 관리자 화면 ── -->
+  <div id="admin-screen">
+    <header class="admin-header">
+      <div class="admin-logo">
+        케이트블랑 드레스룸
+        <span>관리자</span>
+      </div>
+      <button class="logout-btn" onclick="doLogout()">
+        <i class="fas fa-sign-out-alt"></i> 로그아웃
+      </button>
+    </header>
+
+    <main class="admin-main">
+      <h1 class="admin-title">견적요청 관리</h1>
+      <p class="admin-desc">접수된 견적요청을 확인하고 처리 상태를 변경할 수 있습니다.</p>
+
+      <!-- 통계 -->
+      <div class="stats-row" id="stats-row">
+        <div class="stat-card">
+          <div class="s-label">전체 접수</div>
+          <div class="s-num gold" id="stat-total">—</div>
+        </div>
+        <div class="stat-card">
+          <div class="s-label">접수 중</div>
+          <div class="s-num" id="stat-new">—</div>
+        </div>
+        <div class="stat-card">
+          <div class="s-label">검토 중</div>
+          <div class="s-num" id="stat-review">—</div>
+        </div>
+        <div class="stat-card">
+          <div class="s-label">완료</div>
+          <div class="s-num" id="stat-done">—</div>
+        </div>
+      </div>
+
+      <!-- 컨트롤 바 -->
+      <div class="control-bar">
+        <input type="text" class="search-input" id="search-input" placeholder="이름·연락처·지역 검색..." oninput="onSearch()" />
+        <select class="filter-select" id="filter-status" onchange="loadData()">
+          <option value="">전체 상태</option>
+          <option value="접수">접수</option>
+          <option value="검토중">검토 중</option>
+          <option value="완료">완료</option>
+        </select>
+        <button class="refresh-btn" onclick="loadData()">
+          <i class="fas fa-sync-alt"></i> 새로고침
+        </button>
+      </div>
+
+      <!-- 테이블 -->
+      <div class="table-wrap">
+        <div class="table-loading" id="table-loading">
+          <i class="fas fa-spinner fa-spin"></i>
+          데이터를 불러오는 중...
+        </div>
+        <div id="table-container" style="display:none;"></div>
+        <div class="pagination" id="pagination"></div>
+      </div>
+    </main>
+  </div>
+
+  <!-- ── 상세 모달 ── -->
+  <div class="detail-overlay" id="detail-overlay" onclick="closeDetail()">
+    <div class="detail-modal" onclick="event.stopPropagation()">
+      <button class="detail-close" onclick="closeDetail()"><i class="fas fa-times"></i></button>
+      <div id="detail-content"></div>
+    </div>
+  </div>
+
+  <script>
+    // ──────────────────────────────────────────
+    // 설정
+    // ──────────────────────────────────────────
+    // ⚠️ 실운영 시 이 비밀번호를 반드시 변경하세요.
+    const ADMIN_PASSWORD = 'kateblanc2025!';
+    const SESSION_KEY    = 'kb_admin_auth';
+    const PAGE_SIZE      = 15;
+
+    // API URL 계산
+    function apiUrl(path) {
+      return location.origin + '/' + path;
+    }
+
+    let currentPage  = 1;
+    let allData      = [];
+    let filteredData = [];
+    let searchTimer  = null;
+
+    // ──────────────────────────────────────────
+    // 로그인 / 로그아웃
+    // ──────────────────────────────────────────
+    function doLogin() {
+      const pw  = document.getElementById('admin-pw').value;
+      const err = document.getElementById('login-error');
+      if (pw === ADMIN_PASSWORD) {
+        sessionStorage.setItem(SESSION_KEY, '1');
+        document.getElementById('login-screen').style.display  = 'none';
+        document.getElementById('admin-screen').style.display  = 'block';
+        err.textContent = '';
+        loadData();
+      } else {
+        err.textContent = '비밀번호가 올바르지 않습니다.';
+        document.getElementById('admin-pw').value = '';
+      }
+    }
+    function doLogout() {
+      sessionStorage.removeItem(SESSION_KEY);
+      location.reload();
+    }
+
+    // 페이지 로드 시 세션 확인
+    (function checkSession() {
+      if (sessionStorage.getItem(SESSION_KEY) === '1') {
+        document.getElementById('login-screen').style.display = 'none';
+        document.getElementById('admin-screen').style.display = 'block';
+        loadData();
+      }
+    })();
+
+    // ──────────────────────────────────────────
+    // 데이터 로드
+    // ──────────────────────────────────────────
+    async function loadData() {
+      showLoading(true);
+      try {
+        const response = await fetch(apiUrl(`tables/quote_requests?limit=500&sort=-created_at`));
+        if (!response.ok) throw new Error('데이터 로드 실패');
+        const result = await response.json();
+        allData = result.data || [];
+        updateStats(allData);
+        applyFilter();
+      } catch (e) {
+        document.getElementById('table-loading').innerHTML = `
+          <i class="fas fa-exclamation-circle" style="color:#e53e3e;"></i>
+          데이터를 불러올 수 없습니다. 잠시 후 다시 시도해 주세요.
+        `;
+      }
+    }
+
+    function updateStats(data) {
+      document.getElementById('stat-total').textContent  = data.length;
+      document.getElementById('stat-new').textContent    = data.filter(d => d.status === '접수').length;
+      document.getElementById('stat-review').textContent = data.filter(d => d.status === '검토중').length;
+      document.getElementById('stat-done').textContent   = data.filter(d => d.status === '완료').length;
+    }
+
+    function applyFilter() {
+      const search = document.getElementById('search-input').value.trim().toLowerCase();
+      const status = document.getElementById('filter-status').value;
+      filteredData = allData.filter(d => {
+        const matchStatus = !status || d.status === status;
+        const matchSearch = !search ||
+          (d.name  || '').toLowerCase().includes(search) ||
+          (d.phone || '').toLowerCase().includes(search) ||
+          (d.region|| '').toLowerCase().includes(search);
+        return matchStatus && matchSearch;
+      });
+      currentPage = 1;
+      renderTable();
+    }
+
+    function onSearch() {
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(applyFilter, 250);
+    }
+
+    // ──────────────────────────────────────────
+    // 테이블 렌더링
+    // ──────────────────────────────────────────
+    function showLoading(on) {
+      document.getElementById('table-loading').style.display  = on ? 'block' : 'none';
+      document.getElementById('table-container').style.display = on ? 'none' : 'block';
+    }
+
+    function renderTable() {
+      showLoading(false);
+      const container = document.getElementById('table-container');
+      const pagEl     = document.getElementById('pagination');
+
+      if (filteredData.length === 0) {
+        container.innerHTML = `
+          <div class="empty-state">
+            <i class="fas fa-inbox"></i>
+            <p>접수된 견적요청이 없습니다.</p>
+          </div>`;
+        pagEl.innerHTML = '';
+        return;
+      }
+
+      const totalPages = Math.ceil(filteredData.length / PAGE_SIZE);
+      const start = (currentPage - 1) * PAGE_SIZE;
+      const items = filteredData.slice(start, start + PAGE_SIZE);
+
+      let rows = items.map(d => {
+        const date    = d.created_at ? new Date(d.created_at).toLocaleDateString('ko-KR') : '—';
+        const opts    = Array.isArray(d.options) ? d.options : (d.options ? [d.options] : []);
+        const optTags = opts.map(o => `<span class="opt-tag">${o}</span>`).join('');
+        const size    = d.width && d.depth && d.height
+          ? `${d.width}×${d.depth}×${d.height}`
+          : '—';
+        return `
+          <tr>
+            <td>${date}</td>
+            <td><strong>${d.name || '—'}</strong></td>
+            <td>${d.phone || '—'}</td>
+            <td class="hide-mobile">${d.region || '—'}</td>
+            <td class="hide-mobile">${d.layout_type || '—'}</td>
+            <td class="hide-mobile" style="font-size:12px;">${size}</td>
+            <td class="hide-mobile">
+              <div class="options-tags">${optTags || '<span style="color:#9c9288;font-size:12px;">없음</span>'}</div>
+            </td>
+            <td>
+              <span class="status-badge status-${(d.status||'접수').replace(' ','')}">
+                ${d.status || '접수'}
+              </span>
+            </td>
+            <td>
+              <button class="action-btn" onclick="openDetail('${d.id}')">
+                <i class="fas fa-eye"></i>
+              </button>
+              <button class="action-btn del" onclick="deleteRow('${d.id}', '${d.name || ''}')">
+                <i class="fas fa-trash"></i>
+              </button>
+            </td>
+          </tr>`;
+      }).join('');
+
+      container.innerHTML = `
+        <div style="padding:10px 14px; font-size:12px; color:var(--text-sub); border-bottom:1px solid var(--border);">
+          총 <strong>${filteredData.length}</strong>건 · ${currentPage}/${totalPages} 페이지
+        </div>
+        <div style="overflow-x:auto;">
+          <table>
+            <thead>
+              <tr>
+                <th>접수일</th>
+                <th>이름</th>
+                <th>연락처</th>
+                <th class="hide-mobile">지역</th>
+                <th class="hide-mobile">형태</th>
+                <th class="hide-mobile">사이즈(mm)</th>
+                <th class="hide-mobile">옵션</th>
+                <th>상태</th>
+                <th>관리</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>`;
+
+      // 페이지네이션
+      let pag = '';
+      pag += `<button class="page-btn" onclick="goPage(${currentPage-1})" ${currentPage===1?'disabled':''}>
+                <i class="fas fa-chevron-left"></i></button>`;
+      const range = getPageRange(currentPage, totalPages);
+      range.forEach(p => {
+        if (p === '...') {
+          pag += `<span style="padding:0 4px;color:var(--text-sub);">…</span>`;
+        } else {
+          pag += `<button class="page-btn ${p===currentPage?'active':''}" onclick="goPage(${p})">${p}</button>`;
+        }
+      });
+      pag += `<button class="page-btn" onclick="goPage(${currentPage+1})" ${currentPage===totalPages?'disabled':''}>
+                <i class="fas fa-chevron-right"></i></button>`;
+      pagEl.innerHTML = pag;
+    }
+
+    function getPageRange(cur, total) {
+      if (total <= 7) return Array.from({length: total}, (_,i) => i+1);
+      if (cur <= 4) return [1,2,3,4,5,'...',total];
+      if (cur >= total-3) return [1,'...',total-4,total-3,total-2,total-1,total];
+      return [1,'...',cur-1,cur,cur+1,'...',total];
+    }
+
+    function goPage(p) {
+      const total = Math.ceil(filteredData.length / PAGE_SIZE);
+      if (p < 1 || p > total) return;
+      currentPage = p;
+      renderTable();
+      document.querySelector('.table-wrap').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    // ──────────────────────────────────────────
+    // 상세 보기
+    // ──────────────────────────────────────────
+    function openDetail(id) {
+      const d = allData.find(x => x.id === id);
+      if (!d) return;
+      const opts = Array.isArray(d.options) ? d.options.join(', ') : (d.options || '없음');
+      const date = d.created_at ? new Date(d.created_at).toLocaleString('ko-KR') : '—';
+
+      document.getElementById('detail-content').innerHTML = `
+        <h3>견적요청 상세</h3>
+
+        <div class="detail-row">
+          <span class="detail-label">접수일시</span>
+          <span class="detail-val">${date}</span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">처리 상태</span>
+          <span class="detail-val">
+            <select class="status-select" id="detail-status-select" onchange="updateStatus('${d.id}', this.value)">
+              <option value="접수"  ${d.status==='접수' ?'selected':''}>접수</option>
+              <option value="검토중" ${d.status==='검토중'?'selected':''}>검토 중</option>
+              <option value="완료"  ${d.status==='완료' ?'selected':''}>완료</option>
+            </select>
+          </span>
+        </div>
+
+        <div class="detail-divider"></div>
+
+        <div class="detail-row">
+          <span class="detail-label">이름</span>
+          <span class="detail-val">${d.name || '—'}</span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">연락처</span>
+          <span class="detail-val">${d.phone || '—'}</span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">설치 지역</span>
+          <span class="detail-val">${d.region || '—'}</span>
+        </div>
+
+        <div class="detail-divider"></div>
+
+        <div class="detail-row">
+          <span class="detail-label">공간 사이즈</span>
+          <span class="detail-val">
+            가로 ${d.width||'—'}mm × 세로 ${d.depth||'—'}mm × 높이 ${d.height||'—'}mm
+          </span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">형태</span>
+          <span class="detail-val">${d.layout_type || '—'}</span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">선택 옵션</span>
+          <span class="detail-val">${opts || '없음'}</span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">프레임 색상</span>
+          <span class="detail-val">${d.frame_color || '미선택'}</span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">선반 색상</span>
+          <span class="detail-val">${d.shelf_color || '미선택'}</span>
+        </div>
+
+        ${d.request_memo ? `
+        <div class="detail-divider"></div>
+        <div class="detail-row">
+          <span class="detail-label">요청사항</span>
+          <span class="detail-val" style="white-space:pre-wrap;">${d.request_memo}</span>
+        </div>` : ''}
+
+        <div class="detail-divider"></div>
+        <div class="detail-row" style="flex-direction:column; align-items:flex-start; gap:8px;" id="photo-section-${d.id}">
+          <span class="detail-label">첨부 사진</span>
+          <span class="detail-val" style="color:#aaa;" id="photo-status-${d.id}">
+            ${d.has_photo === '사진있음' ? '사진 로딩 중...' : '첨부 없음'}
+          </span>
+        </div>
+      `;
+
+      document.getElementById('detail-overlay').classList.add('open');
+      document.body.style.overflow = 'hidden';
+
+      // 사진이 있는 경우 비동기로 로드
+      if (d.has_photo === '사진있음') {
+        setTimeout(() => loadDetailPhoto(d.id), 100);
+      }
+    }
+
+    function closeDetail() {
+      document.getElementById('detail-overlay').classList.remove('open');
+      document.body.style.overflow = '';
+    }
+
+    // 사진 비동기 로드 — quote_photos 청크 조합
+    async function loadDetailPhoto(quoteId) {
+      const statusEl  = document.getElementById(`photo-status-${quoteId}`);
+      const sectionEl = document.getElementById(`photo-section-${quoteId}`);
+      if (!statusEl || !sectionEl) return;
+
+      try {
+        // quote_id로 청크 검색 (limit 충분히 크게)
+        const res = await fetch(apiUrl(`tables/quote_photos?limit=200`));
+        if (!res.ok) { statusEl.textContent = '사진 로드 실패'; return; }
+        const data = await res.json();
+
+        // 이 quote_id에 해당하는 청크만 필터
+        const chunks = (data.data || [])
+          .filter(p => p.quote_id === quoteId)
+          .sort((a, b) => (a.chunk_index || 0) - (b.chunk_index || 0));
+
+        if (chunks.length === 0) {
+          statusEl.textContent = '사진 없음';
+          return;
+        }
+
+        // 청크 조합
+        const base64full = chunks.map(c => c.chunk_data || '').join('');
+        const fileName   = chunks[0].file_name || 'photo.jpg';
+
+        sectionEl.innerHTML = `
+          <span class="detail-label">첨부 사진</span>
+          <span style="font-size:12px; color:#888;">${fileName} (${chunks.length}개 청크)</span>
+          <img src="${base64full}" alt="첨부 사진"
+               style="max-width:100%; max-height:320px; border-radius:8px; border:1px solid #e4ddd2; margin-top:4px;" />
+          <a href="${base64full}" download="${fileName}"
+             style="font-size:12px; color:var(--gold); text-decoration:none;">
+            <i class="fas fa-download"></i> 사진 다운로드
+          </a>
+        `;
+      } catch(e) {
+        if (statusEl) statusEl.textContent = '사진 로드 오류: ' + e.message;
+      }
+    }
+
+    // ESC 키로 닫기
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape') closeDetail();
+    });
+
+    // ──────────────────────────────────────────
+    // 상태 변경
+    // ──────────────────────────────────────────
+    async function updateStatus(id, status) {
+      try {
+        const response = await fetch(apiUrl(`tables/quote_requests/${id}`), {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status })
+        });
+        if (!response.ok) throw new Error();
+        // 로컬 데이터 업데이트
+        const idx = allData.findIndex(d => d.id === id);
+        if (idx !== -1) allData[idx].status = status;
+        updateStats(allData);
+        applyFilter();
+      } catch {
+        alert('상태 변경 중 오류가 발생했습니다.');
+      }
+    }
+
+    // ──────────────────────────────────────────
+    // 삭제
+    // ──────────────────────────────────────────
+    async function deleteRow(id, name) {
+      if (!confirm(`"${name}" 의 견적요청을 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.`)) return;
+      try {
+        const response = await fetch(apiUrl(`tables/quote_requests/${id}`), { method: 'DELETE' });
+        if (response.status !== 204 && !response.ok) throw new Error();
+        allData = allData.filter(d => d.id !== id);
+        updateStats(allData);
+        applyFilter();
+      } catch {
+        alert('삭제 중 오류가 발생했습니다.');
+      }
+    }
+  </script>
+</body>
+</html>

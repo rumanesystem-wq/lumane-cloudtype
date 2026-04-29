@@ -1,0 +1,880 @@
+/* ================================================================
+   UI 조작 — 메시지 렌더링, 타이핑 인디케이터, 퀵버튼, 배너, 로딩
+================================================================ */
+import { esc, nowStr } from './utils.js';
+import { SERVER } from './config.js';
+
+const URL_REGEX = /https?:\/\/[^\s<>"')\]]+/g;
+
+/* ── 메시지 ID 카운터 ── */
+let _midSeq = 0;
+export function allocMid() { return ++_midSeq; }
+
+/* ── 액션 콜백 (chat.js에서 주입) ── */
+let _onReply  = null;
+let _onEdit   = null;
+let _onDelete = null;
+export function setMsgActionHandlers({ onReply, onEdit, onDelete }) {
+  _onReply  = onReply;
+  _onEdit   = onEdit;
+  _onDelete = onDelete;
+}
+
+/* ── 이모티콘 목록 ── */
+const EMOJIS = ['😊','😄','🥰','😅','🤔','😂','🙏','👍','💜','✨','❤️','🎉','👋','😍','😢','🙌','💪','🤩'];
+
+/* ── DOM 참조 (DOMContentLoaded 이후에 초기화) ── */
+let $msgs, $inp, $sendBtn, $quickArea, $banner, $statusTxt;
+let isLoading = false;
+
+export function initUI() {
+  $msgs      = document.getElementById('messages');
+  $inp       = document.getElementById('inp');
+  $sendBtn   = document.getElementById('sendBtn');
+  $quickArea = document.getElementById('quickArea');
+  $banner    = document.getElementById('banner');
+  $statusTxt = document.getElementById('statusText');
+  initEmojiPicker();
+  initAttachBtn();
+}
+
+/* ── 로딩 상태 ── */
+export function getIsLoading() { return isLoading; }
+
+export function setLoading(val) {
+  isLoading = val;
+  $inp.disabled = val;
+  refreshSendBtn();
+  if (val) showTyping(); else hideTyping();
+}
+
+/* ── 전송 버튼 활성화 상태 갱신 (파일 첨부 or 텍스트 기준) ── */
+function refreshSendBtn() {
+  $sendBtn.disabled = isLoading || (!$inp.value.trim() && !pendingFile);
+}
+
+/* ── 입력창 자동 높이 조정 ── */
+export function autoResize() {
+  $inp.style.height = 'auto';
+  $inp.style.height = Math.min($inp.scrollHeight, 120) + 'px';
+}
+
+export function getInputValue() { return $inp.value.trim(); }
+export function clearInput() { $inp.value = ''; autoResize(); }
+
+/* ── 이벤트 리스너 등록 ── */
+export function initInputListeners(onSend) {
+  $inp.addEventListener('input', () => {
+    autoResize();
+    refreshSendBtn();
+  });
+  $inp.addEventListener('keydown', e => {
+    if (e.key === 'Enter') {
+      if (e.shiftKey) {
+        /* Shift+Enter → 줄바꿈 */
+        e.preventDefault();
+        const pos = $inp.selectionStart;
+        $inp.value = $inp.value.slice(0, pos) + '\n' + $inp.value.slice($inp.selectionEnd);
+        $inp.selectionStart = $inp.selectionEnd = pos + 1;
+        autoResize();
+        refreshSendBtn();
+      } else {
+        e.preventDefault();
+        onSend();
+      }
+    }
+  });
+  $sendBtn.addEventListener('click', onSend);
+}
+
+/* ── 스크롤 ── */
+export function scrollBottom() {
+  requestAnimationFrame(() => { $msgs.scrollTop = $msgs.scrollHeight; });
+}
+
+/* ================================================================
+   복사 기능 — 길게 누르기(모바일) / 우클릭(PC)
+================================================================ */
+function showCopyToast(msg = '복사되었습니다') {
+  const existing = document.querySelector('.copy-toast');
+  if (existing) existing.remove();
+  const toast = document.createElement('div');
+  toast.className = 'copy-toast';
+  toast.textContent = msg;
+  document.body.appendChild(toast);
+  setTimeout(() => {
+    toast.style.opacity = '0';
+    setTimeout(() => toast.remove(), 300);
+  }, 1600);
+}
+
+function copyText(text) {
+  const plain = text.replace(/<br\s*\/?>/gi, '\n').replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>');
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(plain).then(() => showCopyToast()).catch(() => fallbackCopy(plain));
+  } else {
+    fallbackCopy(plain);
+  }
+}
+
+function fallbackCopy(text) {
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.cssText = 'position:fixed;opacity:0;top:0;left:0';
+  document.body.appendChild(ta);
+  ta.select();
+  document.execCommand('copy');
+  document.body.removeChild(ta);
+  showCopyToast();
+}
+
+function addContextMenu(el, rawText) {
+  let pressTimer;
+
+  /* 모바일: 600ms 길게 누르기 → 컨텍스트 메뉴 */
+  el.addEventListener('touchstart', e => {
+    pressTimer = setTimeout(() => {
+      const touch = e.touches[0];
+      showMsgContextMenu(el, touch.clientX, touch.clientY, rawText);
+    }, 600);
+  }, { passive: true });
+  el.addEventListener('touchend',  () => clearTimeout(pressTimer), { passive: true });
+  el.addEventListener('touchmove', () => clearTimeout(pressTimer), { passive: true });
+
+  /* PC: 우클릭 → 컨텍스트 메뉴 */
+  el.addEventListener('contextmenu', e => {
+    e.preventDefault();
+    e.stopPropagation(); // document 버블링 차단 → 연속 우클릭 정상 동작
+    showMsgContextMenu(el, e.clientX, e.clientY, rawText);
+  });
+}
+
+/* ── 글로벌 컨텍스트 메뉴 ── */
+let _ctxMenu = null;
+
+function showMsgContextMenu(groupEl, x, y, text) {
+  closeMsgContextMenu();
+
+  const mid  = groupEl.dataset.mid;
+  const role = groupEl.classList.contains('user') ? 'user' : 'bot';
+
+  const items = [
+    { label: '↩ 답장',  action: 'reply' },
+    { label: '📋 복사',  action: 'copy'  },
+  ];
+  if (role === 'user') {
+    items.push({ label: '✏️ 수정', action: 'edit'   });
+    items.push({ label: '🗑 삭제', action: 'delete', danger: true });
+  }
+
+  const menu = document.createElement('div');
+  menu.id = 'msgCtxMenu';
+  menu.className = 'ctx-menu';
+
+  items.forEach(({ label, action, danger }) => {
+    const btn = document.createElement('button');
+    btn.className = 'ctx-item' + (danger ? ' ctx-danger' : '');
+    btn.textContent = label;
+    btn.addEventListener('click', () => {
+      closeMsgContextMenu();
+      if (action === 'copy')   copyText(text);
+      if (action === 'reply'  && _onReply)  _onReply(mid, role, text);
+      if (action === 'edit'   && _onEdit)   _onEdit(mid, text);
+      if (action === 'delete' && _onDelete) _onDelete(mid);
+    });
+    menu.appendChild(btn);
+  });
+
+  /* 화면 밖으로 나가지 않도록 위치 보정 */
+  menu.style.cssText = `position:fixed;left:${x}px;top:${y}px;z-index:9990;`;
+  document.body.appendChild(menu);
+  _ctxMenu = menu;
+
+  /* 메뉴가 오른쪽/아래 경계를 넘어가면 반대쪽으로 */
+  requestAnimationFrame(() => {
+    const r = menu.getBoundingClientRect();
+    if (r.right  > window.innerWidth)  menu.style.left = (x - r.width)  + 'px';
+    if (r.bottom > window.innerHeight) menu.style.top  = (y - r.height) + 'px';
+  });
+
+  /* 메뉴 바깥 클릭 시 닫기 */
+  setTimeout(() => {
+    document.addEventListener('click', closeMsgContextMenu, { once: true });
+    document.addEventListener('contextmenu', closeMsgContextMenu, { once: true });
+  }, 0);
+}
+
+function closeMsgContextMenu() {
+  _ctxMenu?.remove();
+  _ctxMenu = null;
+}
+
+/* ── 메시지 액션바 생성 ── */
+function makeActionBar(mid, role, text) {
+  const bar = document.createElement('div');
+  bar.className = 'msg-action-bar' + (role === 'user' ? ' mab-user' : ' mab-bot');
+
+  const btns = [
+    { label: '↩', title: '답장', action: 'reply' },
+    { label: '📋', title: '복사', action: 'copy' },
+  ];
+  if (role === 'user') {
+    btns.push({ label: '✏️', title: '수정', action: 'edit' });
+    btns.push({ label: '🗑', title: '삭제', action: 'delete' });
+  }
+
+  btns.forEach(({ label, title, action }) => {
+    const btn = document.createElement('button');
+    btn.className = 'mab-btn';
+    btn.textContent = label;
+    btn.title = title;
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      bar.classList.remove('visible');
+      if (action === 'copy')   copyText(text);
+      if (action === 'reply'  && _onReply)  _onReply(mid, role, text);
+      if (action === 'edit'   && _onEdit)   _onEdit(mid, text);
+      if (action === 'delete' && _onDelete) _onDelete(mid);
+    });
+    bar.appendChild(btn);
+  });
+
+  return bar;
+}
+
+/* ── 답장 인용 DOM (ui.js 내부용) ── */
+function buildQuoteDom(replyTo, isUserBubble) {
+  if (!replyTo) return null;
+  const q = document.createElement('div');
+  q.className = 'reply-quote' + (isUserBubble ? ' reply-quote-user' : '');
+  const who = replyTo.role === 'user' ? '내 메시지' : '루마네';
+  const preview = replyTo.text.length > 50 ? replyTo.text.slice(0, 50) + '…' : replyTo.text;
+  q.innerHTML = `<span class="rq-who">${esc(who)}</span><span class="rq-text">${esc(preview)}</span>`;
+  return q;
+}
+
+/* ================================================================
+   메시지 내용 렌더링 — 이미지/파일 패턴 감지
+================================================================ */
+function renderBubbleContent(text) {
+  /* [이미지]\nURL */
+  const imgMatch = text.match(/^\[이미지\]\n(https?:\/\/\S+)$/);
+  if (imgMatch) {
+    const url = imgMatch[1];
+    const img = document.createElement('img');
+    img.src = url;
+    img.className = 'img-example';
+    img.alt = '첨부 이미지';
+    img.style.maxWidth = '220px';
+    img.onclick = () => window.open(url, '_blank', 'noopener,noreferrer');
+    const wrap = document.createElement('div');
+    wrap.appendChild(img);
+    return wrap;
+  }
+  /* [파일: name]\nURL */
+  const fileMatch = text.match(/^\[파일: ([^\]]+)\]\n(https?:\/\/\S+)$/);
+  if (fileMatch) {
+    const [, name, url] = fileMatch;
+    const ext = name.split('.').pop().toLowerCase();
+
+    /* 동영상 */
+    if (/^(mp4|webm|ogg|mov)$/.test(ext)) {
+      const video = document.createElement('video');
+      video.src = url; video.controls = true; video.preload = 'metadata';
+      video.style.cssText = 'max-width:260px;border-radius:10px;display:block;';
+      return video;
+    }
+    /* 음성 */
+    if (/^(mp3|wav|ogg|m4a|aac)$/.test(ext)) {
+      const audio = document.createElement('audio');
+      audio.src = url; audio.controls = true; audio.preload = 'metadata';
+      audio.style.cssText = 'max-width:260px;display:block;';
+      return audio;
+    }
+
+    const wrap = document.createElement('div');
+    wrap.innerHTML = `📎 <a href="${url}" target="_blank" rel="noopener noreferrer" style="text-decoration:underline">${esc(name)}</a>`;
+    return wrap;
+  }
+  return null; // 일반 텍스트
+}
+
+/* ================================================================
+   메시지 렌더링
+================================================================ */
+export function addMsg(role, text, { mid = null, replyTo = null } = {}) {
+  const clean = text.replace(/```json[\s\S]*?```/g, '').trim();
+  const msgMid = mid ?? allocMid();
+
+  if (role === 'bot') {
+
+    /* 문단 기준으로 말풍선 분리 */
+    const parts = clean.split(/\n\n+/).map(p => p.trim()).filter(Boolean);
+
+    const group = document.createElement('div');
+    group.className = 'msg-group bot';
+    group.dataset.mid = msgMid;
+
+    /* 아바타 */
+    const av = document.createElement('div');
+    av.className = 'av';
+    av.textContent = '👩‍💼';
+    group.appendChild(av);
+
+    /* 본문 */
+    const body = document.createElement('div');
+    body.className = 'msg-body';
+
+    /* 발신자 이름 */
+    const sender = document.createElement('div');
+    sender.className = 'msg-sender';
+    sender.textContent = '루마네';
+    body.appendChild(sender);
+
+    /* 말풍선 행 */
+    const bubblesRow = document.createElement('div');
+    bubblesRow.className = 'msg-bubbles-row';
+
+    const bubblesCol = document.createElement('div');
+    bubblesCol.className = 'msg-bubbles';
+
+    /* 답장 인용 */
+    if (replyTo) {
+      const q = buildQuoteDom(replyTo, false);
+      if (q) bubblesCol.appendChild(q);
+    }
+
+    let hasSpecial = false;
+    for (const part of parts) {
+      const special = renderBubbleContent(part);
+      if (special) {
+        hasSpecial = true;
+        bubblesCol.appendChild(special);
+      } else {
+        const b = document.createElement('div');
+        b.className = 'bubble bot';
+        b.innerHTML = esc(part);
+        bubblesCol.appendChild(b);
+      }
+    }
+
+    /* 메타 (시간) */
+    const meta = document.createElement('div');
+    meta.className = 'msg-meta';
+    const timeEl = document.createElement('span');
+    timeEl.className = 'msg-time';
+    timeEl.textContent = nowStr();
+    meta.appendChild(timeEl);
+
+    bubblesRow.appendChild(bubblesCol);
+    bubblesRow.appendChild(meta);
+    body.appendChild(bubblesRow);
+    group.appendChild(body);
+
+    $msgs.appendChild(group);
+    addContextMenu(group, clean);
+    if (!hasSpecial) appendLinkPreviews(bubblesCol, clean);
+
+  } else {
+    /* 내 메시지 */
+    const group = document.createElement('div');
+    group.className = 'msg-group user';
+    group.dataset.mid = msgMid;
+
+    const bubblesRow = document.createElement('div');
+    bubblesRow.className = 'msg-bubbles-row';
+
+    /* 메타: 읽음 "1" + 시간 (말풍선 왼쪽) */
+    const meta = document.createElement('div');
+    meta.className = 'msg-meta';
+
+    const timeEl = document.createElement('span');
+    timeEl.className = 'msg-time';
+    timeEl.textContent = nowStr();
+    meta.appendChild(timeEl);
+
+    const bubblesCol = document.createElement('div');
+    bubblesCol.className = 'msg-bubbles';
+
+    /* 답장 인용 */
+    if (replyTo) {
+      const q = buildQuoteDom(replyTo, true);
+      if (q) bubblesCol.appendChild(q);
+    }
+
+    const special = renderBubbleContent(clean);
+    if (special) {
+      bubblesCol.appendChild(special);
+    } else {
+      const b = document.createElement('div');
+      b.className = 'bubble user';
+      b.innerHTML = esc(clean);
+      bubblesCol.appendChild(b);
+    }
+
+    bubblesRow.appendChild(meta);
+    bubblesRow.appendChild(bubblesCol);
+    group.appendChild(bubblesRow);
+
+    $msgs.appendChild(group);
+    addContextMenu(group, clean);
+    if (!special) appendLinkPreviews(bubblesCol, clean);
+  }
+
+  scrollBottom();
+}
+
+/* ── 링크 미리보기 (비동기) ── */
+async function appendLinkPreviews(container, text) {
+  const urls = [...new Set(text.match(URL_REGEX) || [])];
+  for (const url of urls.slice(0, 1)) { // 첫 번째 링크만
+    try {
+      const r = await fetch(`${SERVER}/api/og?url=${encodeURIComponent(url)}`);
+      if (!r.ok) continue;
+      const d = await r.json();
+      if (!d.domain && !d.title && !d.description) continue; // 아무것도 없으면 스킵
+
+      const card = document.createElement('a');
+      card.className = 'link-preview';
+      card.href = url;
+      card.target = '_blank';
+      card.rel = 'noopener noreferrer';
+      card.innerHTML =
+        (d.image ? `<img class="lp-img" src="${esc(d.image)}" alt="" loading="lazy" onerror="this.remove()">` : '') +
+        `<div class="lp-text">` +
+        `<div class="lp-domain">${esc(d.domain || new URL(url).hostname)}</div>` +
+        (d.title       ? `<div class="lp-title">${esc(d.title)}</div>`       : '') +
+        (d.description ? `<div class="lp-desc">${esc(d.description)}</div>`  : '') +
+        `</div>`;
+      container.appendChild(card);
+      scrollBottom();
+    } catch { /* 무시 */ }
+  }
+}
+
+/* ── 예시 이미지 메시지 ── */
+export function addImageMsg(imgUrl, label) {
+  const group = document.createElement('div');
+  group.className = 'msg-group bot';
+
+  const av = document.createElement('div');
+  av.className = 'av';
+  av.textContent = '👩‍💼';
+  group.appendChild(av);
+
+  const body = document.createElement('div');
+  body.className = 'msg-body';
+
+  const sender = document.createElement('div');
+  sender.className = 'msg-sender';
+  sender.textContent = '루마네';
+  body.appendChild(sender);
+
+  const bubblesRow = document.createElement('div');
+  bubblesRow.className = 'msg-bubbles-row';
+
+  const bubblesCol = document.createElement('div');
+  bubblesCol.className = 'msg-bubbles';
+
+  const img = document.createElement('img');
+  img.src = imgUrl;
+  img.className = 'img-example';
+  img.alt = label || '드레스룸 예시 이미지';
+  img.onclick = () => window.open(imgUrl, '_blank', 'noopener,noreferrer');
+  img.onerror = () => { group.remove(); };
+  bubblesCol.appendChild(img);
+
+  if (label) {
+    const lbl = document.createElement('div');
+    lbl.className = 'img-example-label';
+    lbl.textContent = label;
+    bubblesCol.appendChild(lbl);
+  }
+
+  const meta = document.createElement('div');
+  meta.className = 'msg-meta';
+  const timeEl = document.createElement('span');
+  timeEl.className = 'msg-time';
+  timeEl.textContent = nowStr();
+  meta.appendChild(timeEl);
+
+  bubblesRow.appendChild(bubblesCol);
+  bubblesRow.appendChild(meta);
+  body.appendChild(bubblesRow);
+  group.appendChild(body);
+
+  $msgs.appendChild(group);
+  scrollBottom();
+}
+
+/* ── 타이핑 인디케이터 ── */
+export function showTyping() {
+  if (document.getElementById('typing')) return;
+  const el = document.createElement('div');
+  el.className = 'typing';
+  el.id = 'typing';
+  el.innerHTML =
+    `<div class="av">👩‍💼</div>` +
+    `<div class="typing-body">` +
+      `<div class="typing-name">루마네</div>` +
+      `<div class="typing-bubble">` +
+        `<div class="td"></div><div class="td"></div><div class="td"></div>` +
+      `</div>` +
+    `</div>`;
+  $msgs.appendChild(el);
+  scrollBottom();
+}
+
+export function hideTyping() {
+  document.getElementById('typing')?.remove();
+}
+
+/* 상담원 타이핑 표시 (AI 타이핑과 별도 엘리먼트) */
+export function showAdminTyping() {
+  if (document.getElementById('adminTyping')) return;
+  const el = document.createElement('div');
+  el.className = 'typing';
+  el.id = 'adminTyping';
+  el.innerHTML =
+    `<div class="av">👩‍💼</div>` +
+    `<div class="typing-body">` +
+      `<div class="typing-name">담당자</div>` +
+      `<div class="typing-bubble">` +
+        `<div class="td"></div><div class="td"></div><div class="td"></div>` +
+      `</div>` +
+    `</div>`;
+  $msgs.appendChild(el);
+  scrollBottom();
+}
+
+export function hideAdminTyping() {
+  document.getElementById('adminTyping')?.remove();
+}
+
+/* ── 퀵 버튼 ── */
+export function setQuick(labels, isChoice = false) {
+  $quickArea.innerHTML = '';
+  if (!labels || labels.length === 0) return;
+
+  const hint = document.createElement('div');
+  hint.className = 'quick-hint-label';
+  hint.textContent = isChoice
+    ? '아래 버튼을 눌러 선택해 주세요'
+    : '💡 예시 — 직접 입력해도 됩니다';
+  $quickArea.appendChild(hint);
+
+  const wrap = document.createElement('div');
+  wrap.className = 'quick-btns';
+
+  labels.forEach(label => {
+    const b = document.createElement('button');
+    b.className = isChoice ? 'qbtn choice' : 'qbtn';
+    b.textContent = label;
+    b.onclick = () => {
+      $inp.value = label;
+      $sendBtn.click();
+    };
+    wrap.appendChild(b);
+  });
+
+  $quickArea.appendChild(wrap);
+}
+
+/* ── AI 응답에서 퀵 버튼 자동 감지 ── */
+export function updateQuickFromText(text) {
+  if (/(드레스룸\s*형태|형태.*어떻게|1자형|ㄱ자형|ㄷ자형|11자형)/.test(text)) {
+    setQuick(['1자형', 'ㄱ자형', 'ㄷ자형', '11자형'], true); return;
+  }
+  if (/(개인정보\s*수집|동의해\s*주시겠어요)/.test(text)) {
+    setQuick(['동의합니다', '동의하지 않습니다'], true); return;
+  }
+  if (/(맞으신가요|확인해\s*주시면\s*접수)/.test(text)) {
+    setQuick(['네, 맞아요! 접수해주세요', '수정할 내용이 있어요'], true); return;
+  }
+  setQuick([]);
+}
+
+/* ── 서버 상태 배너 ── */
+export function setBanner(type, msg = '') {
+  $banner.className = 'banner' + (type ? ' ' + type : '');
+  $banner.textContent = msg;
+}
+
+/* ── 헤더 상태 텍스트 ── */
+export function setStatusText(text) {
+  $statusTxt.textContent = text;
+  const $pcStatus = document.getElementById('pcStatusText');
+  if ($pcStatus) $pcStatus.textContent = text;
+}
+
+/* ── 날짜 구분선 초기화 ── */
+export function initDateSep(text) {
+  const el = document.getElementById('dateSep');
+  if (el) el.textContent = text;
+}
+
+/* ── 새 날짜 구분선 삽입 ── */
+export function appendDateSep(text) {
+  const sep = document.createElement('div');
+  sep.className = 'date-sep';
+  sep.textContent = text;
+  $msgs.appendChild(sep);
+}
+
+/* ── 메시지 목록 초기화 ── */
+export function clearMessages() {
+  $msgs.innerHTML = '';
+}
+
+/* 상담원이 읽음 → 모든 읽음 "1" 제거 */
+export function clearReadReceipts() {
+  $msgs.querySelectorAll('.read-receipt').forEach(el => el.remove());
+}
+
+/* ================================================================
+   이모티콘 피커
+================================================================ */
+function initEmojiPicker() {
+  const picker = document.getElementById('emojiPicker');
+  const btn    = document.getElementById('emojiBtn');
+  if (!picker || !btn) return;
+
+  /* 이모티콘 버튼 생성 */
+  EMOJIS.forEach(emoji => {
+    const item = document.createElement('button');
+    item.className = 'emoji-item';
+    item.textContent = emoji;
+    item.addEventListener('click', () => {
+      const pos = $inp.selectionStart ?? $inp.value.length;
+      const val = $inp.value;
+      $inp.value = val.slice(0, pos) + emoji + val.slice(pos);
+      $inp.selectionStart = $inp.selectionEnd = pos + emoji.length;
+      $inp.dispatchEvent(new Event('input'));
+      $inp.focus();
+      picker.classList.remove('open');
+    });
+    picker.appendChild(item);
+  });
+
+  btn.addEventListener('click', e => {
+    e.stopPropagation();
+    picker.classList.toggle('open');
+  });
+
+  document.addEventListener('click', () => picker.classList.remove('open'));
+}
+
+/* ── 이미지 자동 압축 (Canvas API, 클라이언트 사이드) ── */
+async function compressImageIfNeeded(file) {
+  if (!file.type.startsWith('image/')) return file;   // 이미지 아니면 그대로
+  if (file.size < 300 * 1024) return file;            // 300KB 미만은 압축 불필요
+
+  return new Promise(resolve => {
+    const img = new Image();
+    const blobUrl = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(blobUrl);
+      const MAX = 1920;
+      let { width: w, height: h } = img;
+      if (w > MAX || h > MAX) {
+        const ratio = Math.min(MAX / w, MAX / h);
+        w = Math.round(w * ratio);
+        h = Math.round(h * ratio);
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = w; canvas.height = h;
+      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+      const mime = file.type === 'image/png' ? 'image/png' : 'image/jpeg';
+      const quality = file.type === 'image/png' ? 1 : 0.85;
+      canvas.toBlob(blob => {
+        if (!blob || blob.size >= file.size) { resolve(file); return; } // 압축 효과 없으면 원본
+        const ext  = mime === 'image/png' ? 'png' : 'jpg';
+        const name = (file.name || 'image').replace(/\.[^.]+$/, '') + '.' + ext;
+        resolve(new File([blob], name, { type: mime }));
+      }, mime, quality);
+    };
+    img.onerror = () => { URL.revokeObjectURL(blobUrl); resolve(file); };
+    img.src = blobUrl;
+  });
+}
+
+/* ── 대기 중인 첨부 파일 상태 ── */
+let pendingFile      = null;
+let pendingObjectUrl = null;
+
+export function getPendingFile() { return pendingFile; }
+
+export function clearPendingFile() {
+  if (pendingObjectUrl) { URL.revokeObjectURL(pendingObjectUrl); pendingObjectUrl = null; }
+  pendingFile = null;
+  const bar = document.getElementById('attachBar');
+  if (bar) bar.style.display = 'none';
+  refreshSendBtn();
+}
+
+export async function uploadFilePending(onDone) {
+  if (!pendingFile) return;
+  const file = pendingFile;
+  clearPendingFile();
+  await uploadFile(file, onDone);
+}
+
+async function showAttachBar(rawFile) {
+  const file = await compressImageIfNeeded(rawFile);
+  pendingFile = file;
+  if (pendingObjectUrl) URL.revokeObjectURL(pendingObjectUrl);
+  pendingObjectUrl = URL.createObjectURL(file);
+
+  const bar = document.getElementById('attachBar');
+  if (!bar) return;
+
+  const isImg = file.type.startsWith('image/');
+
+  /* innerHTML 두 번 쓰기 대신 DOM API로 구성 — 이벤트 핸들러 손실 방지 */
+  bar.innerHTML = '';
+
+  if (isImg) {
+    const thumb = document.createElement('img');
+    thumb.src = pendingObjectUrl;
+    thumb.className = 'attach-thumb';
+    thumb.id = 'attachThumb';
+    thumb.alt = '';
+    thumb.title = '클릭하면 크게 보기';
+    thumb.addEventListener('click', () => showImageLightbox(pendingObjectUrl));
+    bar.appendChild(thumb);
+  } else {
+    const icon = document.createElement('span');
+    icon.className = 'attach-icon';
+    icon.textContent = '📎';
+    bar.appendChild(icon);
+  }
+
+  const fname = document.createElement('span');
+  fname.className = 'attach-fname';
+  fname.textContent = file.name || 'screenshot.png';
+  bar.appendChild(fname);
+
+  const removeBtn = document.createElement('button');
+  removeBtn.className = 'attach-remove';
+  removeBtn.id = 'attachRemoveBtn';
+  removeBtn.textContent = '✕';
+  removeBtn.addEventListener('click', () => {
+    clearPendingFile();
+    $inp.focus();
+  });
+  bar.appendChild(removeBtn);
+
+  bar.style.display = 'flex';
+  refreshSendBtn();
+  $inp.focus();
+}
+
+/* ── 파일 첨부 버튼 ── */
+function initAttachBtn() {
+  const btn   = document.getElementById('attachBtn');
+  const input = document.getElementById('fileInput');
+  if (!btn || !input) return;
+  btn.addEventListener('click', () => input.click());
+}
+
+/* ── 파일 업로드 후 이미지/파일 메시지 렌더 ── */
+export function addFileMsg(url, name, isImage) {
+  const group = document.createElement('div');
+  group.className = 'msg-group user';
+
+  const bubblesRow = document.createElement('div');
+  bubblesRow.className = 'msg-bubbles-row';
+
+  const meta = document.createElement('div');
+  meta.className = 'msg-meta';
+  const timeEl = document.createElement('span');
+  timeEl.className = 'msg-time';
+  timeEl.textContent = nowStr();
+  meta.appendChild(timeEl);
+
+  const bubblesCol = document.createElement('div');
+  bubblesCol.className = 'msg-bubbles';
+
+  if (isImage) {
+    const fullUrl = url.startsWith('http') ? url : `${SERVER}${url}`;
+    const img = document.createElement('img');
+    img.src = fullUrl;
+    img.className = 'img-example';
+    img.alt = name || '첨부 이미지';
+    img.style.maxWidth = '220px';
+    img.onclick = () => window.open(fullUrl, '_blank', 'noopener,noreferrer');
+    bubblesCol.appendChild(img);
+  } else {
+    const b = document.createElement('div');
+    b.className = 'bubble user';
+    b.innerHTML = `📎 <a href="${url}" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:underline">${esc(name || '파일')}</a>`;
+    bubblesCol.appendChild(b);
+  }
+
+  bubblesRow.appendChild(meta);
+  bubblesRow.appendChild(bubblesCol);
+  group.appendChild(bubblesRow);
+  $msgs.appendChild(group);
+  scrollBottom();
+}
+
+/* ── 파일 공통 업로드 처리 ── */
+export async function uploadFile(file, onFileSend) {
+  if (file.size > 10 * 1024 * 1024) {
+    showCopyToast('파일은 10MB 이하만 첨부 가능합니다');
+    return;
+  }
+  showCopyToast('업로드 중...');
+  try {
+    const fd = new FormData();
+    /* 클립보드 이미지는 파일명이 없을 수 있어 기본값 지정 */
+    const name = file.name && file.name !== 'image.png' ? file.name : `screenshot-${Date.now()}.png`;
+    fd.append('file', file, name);
+    const r = await fetch(`${SERVER}/api/upload`, { method: 'POST', body: fd });
+    if (!r.ok) throw new Error('업로드 실패');
+    const data = await r.json();
+    if (data.success) onFileSend(data.url, data.name || name, data.isImage);
+  } catch {
+    showCopyToast('업로드에 실패했습니다 😢');
+  }
+}
+
+/* ── 파일 업로드 핸들러 초기화 — 칩 방식 (즉시 업로드 없음) ── */
+export function initFileInput() {
+  const input = document.getElementById('fileInput');
+  if (!input) return;
+
+  /* + 버튼으로 파일 선택 → 칩으로 표시 */
+  input.addEventListener('change', () => {
+    const file = input.files[0];
+    if (!file) return;
+    input.value = '';
+    showAttachBar(file);
+  });
+
+  /* Ctrl+V 클립보드 붙여넣기 → 칩으로 표시 */
+  if ($inp) {
+    $inp.addEventListener('paste', (e) => {
+      const items = Array.from(e.clipboardData?.items || []);
+      const imageItem = items.find(item => item.type.startsWith('image/'));
+      if (!imageItem) return;
+      e.preventDefault();
+      const file = imageItem.getAsFile();
+      if (file) showAttachBar(file);
+    });
+  }
+}
+
+/* ── 이미지 라이트박스 (크게 보기) ── */
+function showImageLightbox(src) {
+  document.getElementById('attachLightbox')?.remove();
+  const lb = document.createElement('div');
+  lb.id = 'attachLightbox';
+  lb.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.85);display:flex;align-items:center;justify-content:center;cursor:zoom-out;padding:20px;';
+  const img = document.createElement('img');
+  img.src = src;
+  img.style.cssText = 'max-width:100%;max-height:100%;border-radius:10px;object-fit:contain;box-shadow:0 8px 40px rgba(0,0,0,.6);';
+  lb.appendChild(img);
+  lb.addEventListener('click', () => lb.remove());
+  document.body.appendChild(lb);
+}

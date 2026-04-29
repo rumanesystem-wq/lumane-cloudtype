@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>📸 사진 저장 진단</title>
+<style>
+  body { font-family: sans-serif; max-width: 680px; margin: 40px auto; padding: 20px; background:#f9f7f4; }
+  h2 { margin-bottom: 4px; }
+  p  { color: #666; font-size: 14px; margin-bottom: 16px; }
+  .card { background:#fff; border-radius:10px; padding:20px; margin-bottom:16px; border:1px solid #e4ddd2; }
+  button { padding:10px 18px; background:#c9a96e; color:#fff; border:none; border-radius:6px; cursor:pointer; font-size:14px; margin:4px 4px 4px 0; }
+  button:hover { background:#a8883f; }
+  button.sec { background:#555; }
+  input[type=file] { display:block; margin:10px 0; padding:8px; border:2px dashed #c9a96e; border-radius:6px; width:100%; }
+  #log { background:#1a1a2e; color:#e0e0e0; padding:16px; border-radius:8px; font-size:12px; font-family:monospace; white-space:pre-wrap; min-height:240px; max-height:500px; overflow-y:auto; }
+  .ok  { color:#6bcf7f; }
+  .err { color:#ff6b6b; }
+  .info{ color:#6bc5ff; }
+  .warn{ color:#ffd700; }
+  #env-info { background:#e8f4fd; border:1px solid #b8d4f0; border-radius:6px; padding:12px; margin-bottom:12px; font-size:13px; }
+</style>
+</head>
+<body>
+<h2>📸 사진 저장 진단 도구</h2>
+<p>배포 환경에서 이 페이지를 열고 테스트하면 정확한 오류를 확인할 수 있습니다.</p>
+
+<div id="env-info">🔍 환경 감지 중...</div>
+
+<div class="card">
+  <strong>STEP 1.</strong> 사진 선택
+  <input type="file" id="test-file" accept=".jpg,.jpeg,.png">
+</div>
+
+<div class="card">
+  <strong>STEP 2.</strong> 테스트 실행
+  <br><br>
+  <button onclick="test1()">① 텍스트만 저장 (기본 확인)</button>
+  <button onclick="test2()">② 사진 압축 후 quote_photos 저장</button>
+  <button onclick="test3()">③ URL 직접 확인</button>
+  <button onclick="clearLog()" class="sec">로그 지우기</button>
+</div>
+
+<div id="log">대기 중...\n</div>
+
+<script>
+const logEl = document.getElementById('log');
+
+// 환경 정보 표시
+const envEl = document.getElementById('env-info');
+envEl.innerHTML = `
+  📍 현재 URL: <strong>${location.href}</strong><br>
+  🌐 Origin: <strong>${location.origin}</strong><br>
+  📡 API URL: <strong>${location.origin}/tables/quote_requests</strong>
+`;
+
+function addLog(msg, type='') {
+  const line = document.createElement('span');
+  line.className = type;
+  line.textContent = '[' + new Date().toLocaleTimeString() + '] ' + msg + '\n';
+  logEl.appendChild(line);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+function clearLog() { logEl.innerHTML = ''; }
+
+// ① 텍스트만 저장
+async function test1() {
+  addLog('── ① 텍스트 저장 테스트 ──', 'info');
+  addLog(`요청 URL: tables/quote_requests`);
+  try {
+    const body = {
+      name:'진단테스트', phone:'010-0000-0000', region:'서울',
+      width:2000, depth:600, height:2400,
+      layout_type:'1자', options:[], frame_color:'화이트',
+      shelf_color:'솔리드화이트', request_memo:'', privacy_agreed:true,
+      status:'접수', file_name:'', has_photo:''
+    };
+    const res = await fetch('tables/quote_requests', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(body)
+    });
+    const txt = await res.text();
+    addLog(`응답 상태: ${res.status}`, res.ok ? 'ok' : 'err');
+    addLog(`응답 내용: ${txt.slice(0,300)}`);
+    if (res.ok) {
+      const rec = JSON.parse(txt);
+      addLog(`✅ 텍스트 저장 성공! ID: ${rec.id}`, 'ok');
+      // 테스트 데이터 삭제
+      await fetch(`tables/quote_requests/${rec.id}`, {method:'DELETE'});
+      addLog('(테스트 레코드 삭제 완료)');
+    }
+  } catch(e) {
+    addLog(`❌ 오류: ${e.message}`, 'err');
+  }
+}
+
+// ② 사진 압축 + quote_photos 저장
+async function test2() {
+  addLog('── ② 사진 저장 테스트 ──', 'info');
+  const fi = document.getElementById('test-file');
+  if (!fi.files || fi.files.length === 0) {
+    addLog('⚠️ 먼저 사진을 선택해 주세요!', 'warn'); return;
+  }
+  const file = fi.files[0];
+  addLog(`선택 파일: ${file.name} / 원본 크기: ${Math.round(file.size/1024)}KB`);
+
+  try {
+    // 압축
+    const steps = [{px:600,q:0.4},{px:400,q:0.25},{px:300,q:0.15},{px:200,q:0.1}];
+    let compressed = null;
+    for (const {px,q} of steps) {
+      const r = await resizeEncode(file, px, q);
+      addLog(`  압축 시도: ${px}px / q${q} → ${Math.round(r.length/1024)}KB`);
+      if (r.length <= 50*1024*1.37) { compressed = r; break; }
+    }
+    if (!compressed) compressed = await resizeEncode(file, 200, 0.1);
+    addLog(`최종 압축: ${Math.round(compressed.length/1024)}KB`, 'ok');
+
+    // 먼저 텍스트 저장 (quote_id 확보)
+    const txtRes = await fetch('tables/quote_requests', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        name:'사진테스트', phone:'010-1111-1111', region:'서울',
+        width:2000, depth:600, height:2400, layout_type:'1자',
+        options:[], frame_color:'화이트', shelf_color:'솔리드화이트',
+        request_memo:'', privacy_agreed:true, status:'접수',
+        file_name: file.name, has_photo:'사진있음'
+      })
+    });
+    const txtData = await txtRes.json();
+    addLog(`텍스트 저장: ${txtRes.status} | id: ${txtData.id}`, txtRes.ok ? 'ok' : 'err');
+    if (!txtRes.ok) return;
+
+    // 사진 저장
+    addLog(`사진 저장 요청 → tables/quote_photos`);
+    const photoRes = await fetch('tables/quote_photos', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        quote_id: txtData.id,
+        file_name: file.name,
+        file_data: compressed
+      })
+    });
+    const photoTxt = await photoRes.text();
+    addLog(`사진 응답: ${photoRes.status}`, photoRes.ok ? 'ok' : 'err');
+    addLog(`사진 응답 내용: ${photoTxt.slice(0,300)}`);
+    if (photoRes.ok) {
+      const pr = JSON.parse(photoTxt);
+      addLog(`✅ 사진 저장 성공! photo_id: ${pr.id} | file_data 있음: ${!!pr.file_data}`, 'ok');
+      addLog(`저장된 file_data 길이: ${(pr.file_data||'').length} chars`, 'ok');
+    } else {
+      addLog(`❌ 사진 저장 실패!`, 'err');
+    }
+
+    // 테스트 데이터 삭제
+    await fetch(`tables/quote_requests/${txtData.id}`, {method:'DELETE'});
+    addLog('(테스트 레코드 삭제 완료)');
+
+  } catch(e) {
+    addLog(`❌ 오류: ${e.message}`, 'err');
+    console.error(e);
+  }
+}
+
+// ③ URL 직접 확인
+async function test3() {
+  addLog('── ③ API URL 접근 테스트 ──', 'info');
+  const urls = [
+    'tables/quote_requests?limit=1',
+    'tables/quote_photos?limit=1',
+  ];
+  for (const url of urls) {
+    try {
+      addLog(`GET ${url} ...`);
+      const r = await fetch(url);
+      const t = await r.text();
+      addLog(`  → ${r.status} | ${t.slice(0,100)}`, r.ok ? 'ok' : 'err');
+    } catch(e) {
+      addLog(`  → 오류: ${e.message}`, 'err');
+    }
+  }
+}
+
+// 유틸
+function resizeEncode(file, maxPx, quality) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      let w = img.width, h = img.height;
+      if (w > maxPx || h > maxPx) {
+        if (w > h) { h = Math.round(h*maxPx/w); w = maxPx; }
+        else       { w = Math.round(w*maxPx/h); h = maxPx; }
+      }
+      const c = document.createElement('canvas');
+      c.width = w; c.height = h;
+      c.getContext('2d').drawImage(img, 0, 0, w, h);
+      URL.revokeObjectURL(url);
+      resolve(c.toDataURL('image/jpeg', quality));
+    };
+    img.onerror = reject;
+    img.src = url;
+  });
+}
+</script>
+</body>
+</html>

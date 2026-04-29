@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>배포 환경 진단</title>
+<style>
+body { font-family: sans-serif; max-width: 600px; margin: 40px auto; padding: 20px; }
+button { padding: 10px 18px; background: #c9a96e; color: #fff; border: none; border-radius: 6px; cursor: pointer; margin: 4px; }
+#log { background: #1a1a2e; color: #e0e0e0; padding: 16px; border-radius: 8px; font-size: 12px; font-family: monospace; white-space: pre-wrap; min-height: 200px; margin-top: 16px; }
+.ok { color: #6bcf7f; } .err { color: #ff6b6b; } .info { color: #6bc5ff; }
+</style>
+</head>
+<body>
+<h2>배포 환경 진단</h2>
+<button onclick="testApi()">① API 연결 테스트</button>
+<button onclick="testPhoto()">② 사진 저장 테스트</button>
+<input type="file" id="f" accept="image/*" style="margin:8px 0;display:block;">
+<div id="log">대기 중...\n</div>
+<script>
+const log = document.getElementById('log');
+function L(msg, t='') {
+  const s = document.createElement('span');
+  s.className = t;
+  s.textContent = new Date().toLocaleTimeString() + ' ' + msg + '\n';
+  log.appendChild(s);
+  log.scrollTop = 9999;
+}
+
+L('현재 URL: ' + location.href, 'info');
+L('Origin: ' + location.origin, 'info');
+
+// 배포 환경: gensparkspace.com → origin + '/'가 맞는 base
+const BASE = location.origin + '/';
+L('API BASE: ' + BASE, 'info');
+
+async function testApi() {
+  L('── API 연결 테스트 ──', 'info');
+  try {
+    const r = await fetch(BASE + 'tables/quote_requests?limit=1');
+    const t = await r.text();
+    L('응답: ' + r.status, r.ok ? 'ok' : 'err');
+    L('내용: ' + t.slice(0, 200));
+  } catch(e) { L('오류: ' + e.message, 'err'); }
+}
+
+async function testPhoto() {
+  L('── 사진 저장 테스트 ──', 'info');
+  const fi = document.getElementById('f');
+  if (!fi.files.length) { L('⚠️ 사진 먼저 선택!', 'err'); return; }
+  const file = fi.files[0];
+  L('파일: ' + file.name + ' (' + Math.round(file.size/1024) + 'KB)');
+
+  // 압축
+  const b64 = await compress(file, 400, 0.4);
+  L('압축 후: ' + Math.round(b64.length/1024) + 'KB');
+
+  // 텍스트 저장
+  const r1 = await fetch(BASE + 'tables/quote_requests', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({name:'진단',phone:'010-0000-0000',region:'서울',
+      width:2000,depth:600,height:2400,layout_type:'1자',options:[],
+      frame_color:'화이트',shelf_color:'',request_memo:'',
+      privacy_agreed:true,status:'접수',file_name:file.name,has_photo:'사진있음'})
+  });
+  const d1 = await r1.json();
+  L('텍스트 저장: ' + r1.status + ' id=' + d1.id, r1.ok ? 'ok' : 'err');
+  if (!r1.ok) return;
+
+  // 청크 저장
+  const chunks = [];
+  for (let i = 0; i < b64.length; i += 20000) chunks.push(b64.slice(i, i+20000));
+  L('청크 수: ' + chunks.length);
+
+  for (let i = 0; i < chunks.length; i++) {
+    const r2 = await fetch(BASE + 'tables/quote_photos', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({quote_id:d1.id,file_name:file.name,
+        chunk_index:i,chunk_total:chunks.length,chunk_data:chunks[i]})
+    });
+    const t2 = await r2.text();
+    L('청크 ' + (i+1) + '/' + chunks.length + ': ' + r2.status, r2.ok ? 'ok' : 'err');
+    if (!r2.ok) { L('오류내용: ' + t2.slice(0,200), 'err'); break; }
+  }
+  L('✅ 완료! 테스트 레코드 삭제 중...');
+  await fetch(BASE + 'tables/quote_requests/' + d1.id, {method:'DELETE'});
+  L('삭제 완료');
+}
+
+function compress(file, px, q) {
+  return new Promise((res, rej) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      let w=img.width, h=img.height;
+      if(w>px||h>px){ if(w>h){h=Math.round(h*px/w);w=px;}else{w=Math.round(w*px/h);h=px;} }
+      const c = document.createElement('canvas');
+      c.width=w; c.height=h;
+      c.getContext('2d').drawImage(img,0,0,w,h);
+      URL.revokeObjectURL(url);
+      res(c.toDataURL('image/jpeg', q));
+    };
+    img.onerror = rej;
+    img.src = url;
+  });
+}
+</script>
+</body>
+</html>

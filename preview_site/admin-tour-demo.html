@@ -1,0 +1,570 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>어드민 투어 데모</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f3f4f6; }
+
+.admin-wrap { display: flex; height: 100vh; }
+
+.sidebar {
+  width: 200px; background: #1e1b4b; color: #fff;
+  padding: 20px 0; display: flex; flex-direction: column; gap: 4px; flex-shrink: 0;
+}
+.sidebar-logo { padding: 0 20px 20px; font-size: 15px; font-weight: 700; color: #a5b4fc; }
+.nav-item {
+  padding: 10px 20px; cursor: pointer; font-size: 13px; color: #c7d2fe; transition: background .15s;
+}
+.nav-item:hover, .nav-item.active { background: rgba(255,255,255,.1); color: #fff; }
+
+.main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+.topbar {
+  background: #fff; border-bottom: 1px solid #e5e7eb;
+  padding: 12px 20px; display: flex; align-items: center; justify-content: space-between;
+}
+.topbar h1 { font-size: 15px; font-weight: 700; color: #111827; }
+
+.tabs {
+  background: #fff; border-bottom: 1px solid #e5e7eb;
+  padding: 0 20px; display: flex; gap: 4px;
+}
+.tab-btn {
+  padding: 10px 14px; border: none; background: none; cursor: pointer;
+  font-size: 13px; font-weight: 600; color: #6b7280; border-bottom: 2px solid transparent;
+  white-space: nowrap;
+}
+.tab-btn.active { color: #7c3aed; border-bottom-color: #7c3aed; }
+
+.content { flex: 1; padding: 20px; overflow-y: auto; }
+
+/* 탭 패널 */
+.tab-panel { display: none; }
+.tab-panel.active { display: block; }
+
+/* 카드들 */
+.btn { padding: 7px 14px; border-radius: 8px; border: none; cursor: pointer; font-size: 13px; font-weight: 600; }
+.btn-primary { background: #7c3aed; color: #fff; }
+.btn-outline { background: #fff; color: #374151; border: 1px solid #e5e7eb; }
+.btn-green { background: #16a34a; color: #fff; }
+.btn-red { background: #ef4444; color: #fff; }
+
+.card {
+  background: #fff; border-radius: 12px; border: 1px solid #e5e7eb; padding: 16px; margin-bottom: 12px;
+}
+.card h3 { font-size: 13px; font-weight: 700; color: #111827; margin-bottom: 12px; }
+
+.stats-row { display: flex; gap: 12px; margin-bottom: 16px; }
+.stat-card {
+  flex: 1; background: #fff; border-radius: 12px; padding: 16px;
+  border: 1px solid #e5e7eb; text-align: center; cursor: pointer; transition: border-color .15s;
+}
+.stat-card:hover { border-color: #7c3aed; }
+.stat-label { font-size: 12px; color: #9ca3af; margin-bottom: 6px; }
+.stat-value { font-size: 24px; font-weight: 700; color: #111827; }
+
+.session-card {
+  padding: 12px 14px; border-radius: 10px; border: 2px solid #7c3aed;
+  margin-bottom: 8px; cursor: pointer; background: #faf5ff;
+}
+.quote-row {
+  display: flex; align-items: center; gap: 12px; padding: 12px 14px;
+  border-radius: 10px; border: 1px solid #e5e7eb; background: #fff; margin-bottom: 8px;
+  cursor: pointer; transition: background .15s;
+}
+.quote-row:hover { background: #f9fafb; }
+
+.tag {
+  font-size: 10px; padding: 2px 8px; border-radius: 10px; font-weight: 700;
+}
+.tag-new    { background: #fef3c7; color: #92400e; }
+.tag-ai     { background: #ede9fe; color: #7c3aed; }
+.tag-manual { background: #dcfce7; color: #166534; }
+.tag-done   { background: #f3f4f6; color: #6b7280; }
+
+.search-bar {
+  display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap;
+}
+.search-bar input, .search-bar select {
+  padding: 8px 12px; border: 1px solid #e5e7eb; border-radius: 8px;
+  font-size: 13px; outline: none; background: #fff;
+}
+.search-bar input { flex: 1; min-width: 180px; }
+
+.live-split { display: flex; gap: 16px; height: 420px; }
+.live-list { width: 240px; flex-shrink: 0; overflow-y: auto; }
+.live-chat {
+  flex: 1; background: #fff; border-radius: 12px; border: 1px solid #e5e7eb;
+  display: flex; flex-direction: column;
+}
+.live-chat-header {
+  padding: 12px 16px; border-bottom: 1px solid #e5e7eb;
+  font-size: 13px; font-weight: 700; color: #111827;
+  display: flex; align-items: center; justify-content: space-between;
+}
+.live-chat-msgs { flex: 1; padding: 16px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+.bubble-bot, .bubble-user {
+  max-width: 75%; padding: 10px 14px; border-radius: 12px; font-size: 13px; line-height: 1.5;
+}
+.bubble-bot { background: #f3f4f6; color: #111827; align-self: flex-start; }
+.bubble-user { background: #7c3aed; color: #fff; align-self: flex-end; }
+.live-chat-input {
+  padding: 12px 16px; border-top: 1px solid #e5e7eb;
+  display: flex; gap: 8px;
+}
+.live-chat-input input {
+  flex: 1; padding: 8px 12px; border: 1px solid #e5e7eb; border-radius: 8px;
+  font-size: 13px; outline: none;
+}
+
+/* 도움말 버튼 */
+.help-btn {
+  position: fixed; bottom: 24px; right: 24px;
+  width: 44px; height: 44px; border-radius: 50%;
+  background: #7c3aed; color: #fff; border: none;
+  font-size: 20px; cursor: pointer; box-shadow: 0 4px 12px rgba(124,58,237,.4);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 100; transition: transform .15s;
+}
+.help-btn:hover { transform: scale(1.1); }
+
+/* ── 투어 ── */
+#tourSpotlight {
+  position: fixed;
+  border-radius: 12px;
+  box-shadow: 0 0 0 9999px rgba(0,0,0,.55), 0 0 0 3px #7c3aed;
+  transition: all .35s cubic-bezier(.4,0,.2,1);
+  pointer-events: none;
+  z-index: 1001;
+  opacity: 0;
+}
+#tourPopup {
+  display: none;
+  position: fixed;
+  background: #fff; border-radius: 16px; padding: 20px 22px;
+  width: 300px; box-shadow: 0 8px 32px rgba(0,0,0,.18);
+  z-index: 1002; pointer-events: all;
+  transition: top .3s, left .3s;
+}
+#tourPopup.active { display: block; }
+.tour-overlay-bg {
+  display: none; position: fixed; inset: 0; background: rgba(0,0,0,.55); z-index: 1000;
+}
+.tour-overlay-bg.active { display: block; }
+
+.tour-step-badge {
+  font-size: 11px; font-weight: 700; color: #7c3aed;
+  background: #ede9fe; padding: 2px 10px; border-radius: 20px;
+  display: inline-block; margin-bottom: 10px;
+}
+.tour-section-label {
+  font-size: 10px; font-weight: 700; color: #9ca3af; letter-spacing: .05em;
+  text-transform: uppercase; margin-bottom: 4px;
+}
+.tour-title { font-size: 15px; font-weight: 700; color: #111827; margin-bottom: 6px; }
+.tour-desc { font-size: 13px; color: #6b7280; line-height: 1.6; }
+.tour-footer {
+  display: flex; align-items: center; justify-content: space-between; margin-top: 16px;
+}
+.tour-skip { font-size: 12px; color: #9ca3af; cursor: pointer; background: none; border: none; }
+.tour-skip:hover { color: #6b7280; }
+.tour-nav { display: flex; gap: 8px; }
+.tour-prev {
+  padding: 7px 14px; border-radius: 8px; border: 1px solid #e5e7eb;
+  background: #fff; color: #374151; font-size: 13px; font-weight: 600; cursor: pointer;
+}
+.tour-next {
+  padding: 7px 18px; border-radius: 8px; border: none;
+  background: #7c3aed; color: #fff; font-size: 13px; font-weight: 600; cursor: pointer;
+}
+.tour-prev:hover { background: #f9fafb; }
+.tour-next:hover { background: #6d28d9; }
+
+/* 완료 모달 */
+#tourDoneModal {
+  display: none; position: fixed; inset: 0; z-index: 1100;
+  background: rgba(0,0,0,.5); align-items: center; justify-content: center;
+}
+#tourDoneModal.active { display: flex; }
+.tour-done-box {
+  background: #fff; border-radius: 20px; padding: 32px 28px;
+  text-align: center; max-width: 320px; width: 90%;
+  animation: popIn .3s cubic-bezier(.4,0,.2,1);
+}
+@keyframes popIn {
+  from { transform: scale(.85); opacity: 0; }
+  to   { transform: scale(1); opacity: 1; }
+}
+.tour-done-emoji { font-size: 48px; margin-bottom: 12px; }
+.tour-done-title { font-size: 18px; font-weight: 700; color: #111827; margin-bottom: 8px; }
+.tour-done-desc { font-size: 13px; color: #6b7280; line-height: 1.6; margin-bottom: 20px; }
+.tour-done-btn {
+  width: 100%; padding: 12px; border-radius: 10px; border: none;
+  background: #7c3aed; color: #fff; font-size: 14px; font-weight: 700; cursor: pointer;
+}
+</style>
+</head>
+<body>
+
+<div class="admin-wrap">
+  <!-- 사이드바 -->
+  <div class="sidebar">
+    <div class="sidebar-logo">🏠 루마네 어드민</div>
+    <div class="nav-item active" onclick="switchTab('dashboard')">📊 대시보드</div>
+    <div class="nav-item" onclick="switchTab('quotes')">📋 견적 목록</div>
+    <div class="nav-item" onclick="switchTab('live')">📡 라이브 상담</div>
+    <div class="nav-item" onclick="switchTab('history')">🗂️ 저장된 상담</div>
+  </div>
+
+  <div class="main">
+    <div class="topbar">
+      <h1 id="pageTitle">대시보드</h1>
+      <button class="btn btn-outline">🔄 새로고침</button>
+    </div>
+
+    <div class="tabs">
+      <button class="tab-btn active" id="tab-dashboard" onclick="switchTab('dashboard')">📊 대시보드</button>
+      <button class="tab-btn" id="tab-quotes" onclick="switchTab('quotes')">📋 견적 목록</button>
+      <button class="tab-btn" id="tab-live" onclick="switchTab('live')">📡 라이브 상담</button>
+      <button class="tab-btn" id="tab-history" onclick="switchTab('history')">🗂️ 저장된 상담</button>
+    </div>
+
+    <div class="content">
+
+      <!-- ── 대시보드 ── -->
+      <div class="tab-panel active" id="panel-dashboard">
+        <div class="stats-row" id="d-stats">
+          <div class="stat-card"><div class="stat-label">오늘 상담</div><div class="stat-value">3건</div></div>
+          <div class="stat-card"><div class="stat-label">이번 주</div><div class="stat-value">17건</div></div>
+          <div class="stat-card"><div class="stat-label">이번 달</div><div class="stat-value">52건</div></div>
+          <div class="stat-card"><div class="stat-label">누적</div><div class="stat-value">284건</div></div>
+        </div>
+        <div class="card" id="d-live">
+          <h3>🟢 실시간 상담 (1개)</h3>
+          <div class="session-card">
+            <div style="font-size:13px;font-weight:700;">🤖 김민지 고객 <span class="tag tag-new">NEW</span></div>
+            <div style="font-size:11px;color:#9ca3af;margin-top:3px;">💬 3개 메시지 · 2분 전</div>
+          </div>
+        </div>
+        <div class="card" id="d-saved">
+          <h3>🗂️ 최근 저장된 상담</h3>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;">
+            <div style="flex:1;min-width:160px;padding:12px;border-radius:10px;border:1px solid #e5e7eb;">
+              <div style="font-size:13px;font-weight:600;">박서연 고객님</div>
+              <div style="font-size:11px;color:#9ca3af;margin-top:3px;">경기 · ㄷ자형 · 430만원</div>
+            </div>
+            <div style="flex:1;min-width:160px;padding:12px;border-radius:10px;border:1px solid #e5e7eb;">
+              <div style="font-size:13px;font-weight:600;">이준호 고객님</div>
+              <div style="font-size:11px;color:#9ca3af;margin-top:3px;">서울 · ㅡ자형 · 280만원</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── 견적 목록 ── -->
+      <div class="tab-panel" id="panel-quotes">
+        <div class="search-bar" id="q-search">
+          <input type="text" placeholder="이름·연락처·지역 검색...">
+          <select><option>전체 상태</option><option>견적 대기</option><option>완료</option></select>
+          <button class="btn btn-primary">+ 수동 등록</button>
+        </div>
+        <div id="q-list">
+          <div class="quote-row">
+            <div style="flex:1;">
+              <div style="font-size:13px;font-weight:700;">박서연 <span class="tag tag-new">신규</span></div>
+              <div style="font-size:11px;color:#9ca3af;margin-top:2px;">031-1234-5678 · 경기 · ㄷ자형</div>
+            </div>
+            <div style="font-size:13px;font-weight:700;color:#7c3aed;">4,300,000원</div>
+            <button class="btn btn-outline" style="font-size:11px;padding:5px 10px;">상세보기</button>
+          </div>
+          <div class="quote-row">
+            <div style="flex:1;">
+              <div style="font-size:13px;font-weight:700;">이준호 <span class="tag tag-done">완료</span></div>
+              <div style="font-size:11px;color:#9ca3af;margin-top:2px;">010-9876-5432 · 서울 · ㅡ자형</div>
+            </div>
+            <div style="font-size:13px;font-weight:700;color:#7c3aed;">2,800,000원</div>
+            <button class="btn btn-outline" style="font-size:11px;padding:5px 10px;">상세보기</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── 라이브 상담 ── -->
+      <div class="tab-panel" id="panel-live">
+        <div class="live-split">
+          <div class="live-list" id="l-list">
+            <div style="font-size:12px;color:#9ca3af;margin-bottom:8px;">1개 세션</div>
+            <div class="session-card">
+              <div style="font-size:13px;font-weight:700;">🤖 김민지 고객 <span class="tag tag-new">NEW</span></div>
+              <div style="font-size:11px;color:#9ca3af;margin-top:3px;">💬 3개 메시지 · 2분 전</div>
+            </div>
+          </div>
+          <div class="live-chat" id="l-chat">
+            <div class="live-chat-header">
+              <span>김민지 고객 대화</span>
+              <div style="display:flex;gap:6px;">
+                <button class="btn btn-green" id="l-takeover" style="font-size:11px;padding:5px 10px;">난입하기</button>
+                <button class="btn btn-outline" style="font-size:11px;padding:5px 10px;">저장</button>
+              </div>
+            </div>
+            <div class="live-chat-msgs">
+              <div class="bubble-bot">안녕하세요~ 케이트블랑 드레스룸 상담 담당 루마네예요 :)</div>
+              <div class="bubble-user">드레스룸 견적 받고 싶어요</div>
+              <div class="bubble-bot">네! 공간 형태가 어떻게 되시나요? ㄱ자, ㄷ자, ㅡ자 중에서요 😊</div>
+            </div>
+            <div class="live-chat-input" id="l-input">
+              <input type="text" placeholder="고객에게 직접 메시지를 입력하세요...">
+              <button class="btn btn-primary">전송</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── 저장된 상담 ── -->
+      <div class="tab-panel" id="panel-history">
+        <div class="search-bar" id="h-search">
+          <input type="text" placeholder="이름·연락처·지역 검색...">
+          <input type="date">
+          <select><option value="">전체</option><option value="manual">수동 저장</option><option value="expired">자동 저장</option></select>
+          <button class="btn btn-outline">↻ 새로고침</button>
+        </div>
+        <div id="h-list">
+          <div class="quote-row">
+            <div style="flex:1;">
+              <div style="font-size:13px;font-weight:700;">박서연 <span class="tag tag-manual">자동저장</span></div>
+              <div style="font-size:11px;color:#9ca3af;margin-top:2px;">경기 · ㄷ자형 · 4,300,000원 · 04/29 14:32</div>
+            </div>
+            <div style="display:flex;gap:6px;">
+              <button class="btn btn-primary" style="font-size:11px;padding:5px 10px;">견적등록</button>
+              <button class="btn btn-outline" style="font-size:11px;padding:5px 10px;">상세보기</button>
+            </div>
+          </div>
+          <div class="quote-row">
+            <div style="flex:1;">
+              <div style="font-size:13px;font-weight:700;">이준호 <span class="tag tag-ai">AI저장</span></div>
+              <div style="font-size:11px;color:#9ca3af;margin-top:2px;">서울 · ㅡ자형 · 2,800,000원 · 04/28 11:05</div>
+            </div>
+            <div style="display:flex;gap:6px;">
+              <button class="btn btn-primary" style="font-size:11px;padding:5px 10px;">견적등록</button>
+              <button class="btn btn-outline" style="font-size:11px;padding:5px 10px;">상세보기</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /content -->
+  </div><!-- /main -->
+</div>
+
+<!-- ? 버튼 -->
+<button class="help-btn" onclick="startTourForCurrentTab()" title="이 페이지 도움말">?</button>
+
+<!-- 투어 요소 -->
+<div class="tour-overlay-bg" id="tourBg" onclick="endTour()"></div>
+<div id="tourSpotlight"></div>
+<div id="tourPopup">
+  <div class="tour-section-label" id="tourSection"></div>
+  <div class="tour-step-badge" id="tourBadge">1 / 3</div>
+  <div class="tour-title" id="tourTitle"></div>
+  <div class="tour-desc" id="tourDesc"></div>
+  <div class="tour-footer">
+    <button class="tour-skip" onclick="endTour()">건너뛰기</button>
+    <div class="tour-nav">
+      <button class="tour-prev" id="tourPrev" onclick="prevStep()">이전</button>
+      <button class="tour-next" id="tourNext" onclick="nextStep()">다음 →</button>
+    </div>
+  </div>
+</div>
+
+<!-- 완료 모달 -->
+<div id="tourDoneModal">
+  <div class="tour-done-box">
+    <div class="tour-done-emoji">🎉</div>
+    <div class="tour-done-title">준비 완료!</div>
+    <div class="tour-done-desc">이제 어드민을 자유롭게 사용해보세요.<br>언제든 오른쪽 아래 <strong>? 버튼</strong>으로<br>다시 볼 수 있어요.</div>
+    <button class="tour-done-btn" onclick="closeDone()">시작하기</button>
+  </div>
+</div>
+
+<script>
+/* ── 탭별 투어 정의 ── */
+const TOURS = {
+  dashboard: [
+    {
+      target: 'd-stats', pos: 'bottom', section: '대시보드',
+      title: '📊 상담 통계',
+      desc: '오늘 / 이번 주 / 이번 달 / 누적 상담 수를 한눈에 볼 수 있어요. 숫자를 클릭하면 해당 기간 상담 목록이 펼쳐져요.',
+    },
+    {
+      target: 'd-live', pos: 'bottom', section: '대시보드',
+      title: '🟢 실시간 상담',
+      desc: '지금 루마네와 대화 중인 고객이 표시돼요. NEW 뱃지가 달린 건 아직 확인 안 한 새 상담이에요. 클릭하면 대화 내용을 볼 수 있어요.',
+    },
+    {
+      target: 'd-saved', pos: 'top', section: '대시보드',
+      title: '🗂️ 최근 저장된 상담',
+      desc: '가장 최근에 끝난 상담이 여기 표시돼요. 이름·지역·견적금액을 빠르게 확인하고 클릭하면 상세 내용으로 이동해요.',
+    },
+  ],
+  quotes: [
+    {
+      target: 'q-search', pos: 'bottom', section: '견적 목록',
+      title: '🔍 검색 · 필터',
+      desc: '이름, 연락처, 지역으로 빠르게 검색할 수 있어요. 상태 필터로 견적 대기 / 완료를 구분해서 볼 수도 있어요.',
+    },
+    {
+      target: 'q-list', pos: 'top', section: '견적 목록',
+      title: '📋 견적 목록',
+      desc: 'AI가 상담에서 뽑아낸 견적이 자동으로 여기에 쌓여요. 상세보기를 클릭하면 치수·옵션·대화 내용을 모두 볼 수 있어요.',
+    },
+  ],
+  live: [
+    {
+      target: 'l-list', pos: 'right', section: '라이브 상담',
+      title: '📋 접속 중인 고객 목록',
+      desc: '지금 이 순간 채팅창을 열고 있는 고객이 실시간으로 표시돼요. 클릭하면 오른쪽에 대화 내용이 펼쳐져요.',
+    },
+    {
+      target: 'l-chat', pos: 'left', section: '라이브 상담',
+      title: '💬 실시간 대화 내용',
+      desc: 'AI와 고객이 주고받는 대화를 실시간으로 볼 수 있어요. 대화 내용을 보고 직접 끼어들어 답변할 수도 있어요.',
+    },
+    {
+      target: 'l-takeover', pos: 'bottom', section: '라이브 상담',
+      title: '👩‍💼 난입하기',
+      desc: '이 버튼을 누르면 AI 대신 담당자가 직접 고객에게 답변할 수 있어요. 민감한 상담이나 견적 확정 시 사용하세요.',
+    },
+    {
+      target: 'l-input', pos: 'top', section: '라이브 상담',
+      title: '✏️ 메시지 입력',
+      desc: '난입 후 여기에 입력하면 고객 채팅창에 바로 전송돼요. 고객에게는 자연스럽게 대화가 이어지는 것처럼 보여요.',
+    },
+  ],
+  history: [
+    {
+      target: 'h-search', pos: 'bottom', section: '저장된 상담',
+      title: '🔍 검색 · 날짜 필터',
+      desc: '이름·연락처·지역으로 검색하거나 날짜를 지정해서 특정 날 상담만 볼 수 있어요. 저장 방식(자동/수동)으로 필터링도 돼요.',
+    },
+    {
+      target: 'h-list', pos: 'top', section: '저장된 상담',
+      title: '🗂️ 저장된 상담 목록',
+      desc: 'AI가 자동으로 저장한 상담 기록이에요. 지역·형태·견적금액을 한눈에 볼 수 있고 상세보기로 전체 대화를 확인할 수 있어요.',
+    },
+    {
+      target: null, pos: 'fixed-center', section: '저장된 상담',
+      title: '📋 견적 등록 버튼',
+      desc: '상담 내용이 마음에 들면 \'견적등록\' 버튼을 눌러 견적 목록 탭으로 옮길 수 있어요. AI가 이름·연락처·금액을 자동으로 채워줘요.',
+    },
+  ],
+};
+
+let currentTab = 'dashboard';
+let currentStep = 0;
+let currentTour = [];
+
+/* ── 탭 전환 ── */
+function switchTab(tab) {
+  currentTab = tab;
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.getElementById('panel-' + tab).classList.add('active');
+  document.getElementById('tab-' + tab).classList.add('active');
+  const titles = { dashboard:'대시보드', quotes:'견적 목록', live:'라이브 상담', history:'저장된 상담' };
+  document.getElementById('pageTitle').textContent = titles[tab];
+}
+
+/* ── 투어 ── */
+function startTourForCurrentTab() {
+  currentTour = TOURS[currentTab] || [];
+  if (!currentTour.length) return;
+  currentStep = 0;
+  document.getElementById('tourBg').classList.add('active');
+  document.getElementById('tourSpotlight').style.opacity = '1';
+  document.getElementById('tourPopup').classList.add('active');
+  showStep();
+}
+
+function showStep() {
+  const step = currentTour[currentStep];
+  document.getElementById('tourSection').textContent = step.section;
+  document.getElementById('tourBadge').textContent = `${currentStep + 1} / ${currentTour.length}`;
+  document.getElementById('tourTitle').textContent = step.title;
+  document.getElementById('tourDesc').textContent = step.desc;
+  document.getElementById('tourPrev').style.display = currentStep === 0 ? 'none' : '';
+  document.getElementById('tourNext').textContent = currentStep === currentTour.length - 1 ? '완료 🎉' : '다음 →';
+
+  const popup = document.getElementById('tourPopup');
+  const spotlight = document.getElementById('tourSpotlight');
+
+  if (!step.target || step.pos === 'fixed-center') {
+    spotlight.style.opacity = '0';
+    popup.style.left = '50%';
+    popup.style.top  = '50%';
+    popup.style.transform = 'translate(-50%, -50%)';
+    return;
+  }
+
+  const el = document.getElementById(step.target);
+  if (!el) return;
+  const rect = el.getBoundingClientRect();
+  const pad = 8, popW = 300, popH = 220, margin = 12;
+  popup.style.transform = '';
+
+  spotlight.style.left   = (rect.left - pad) + 'px';
+  spotlight.style.top    = (rect.top - pad) + 'px';
+  spotlight.style.width  = (rect.width + pad * 2) + 'px';
+  spotlight.style.height = (rect.height + pad * 2) + 'px';
+  spotlight.style.opacity = '1';
+
+  const leftPos = Math.min(Math.max(rect.left, margin), window.innerWidth - popW - margin);
+
+  if (step.pos === 'bottom') {
+    popup.style.left = leftPos + 'px';
+    popup.style.top  = Math.min(rect.bottom + pad + 12, window.innerHeight - popH - margin) + 'px';
+  } else if (step.pos === 'top') {
+    popup.style.left = leftPos + 'px';
+    popup.style.top  = Math.max(rect.top - popH - pad - 12, margin) + 'px';
+  } else if (step.pos === 'right') {
+    popup.style.left = Math.min(rect.right + pad + 12, window.innerWidth - popW - margin) + 'px';
+    popup.style.top  = Math.max(rect.top, margin) + 'px';
+  } else if (step.pos === 'left') {
+    popup.style.left = Math.max(rect.left - popW - pad - 12, margin) + 'px';
+    popup.style.top  = Math.max(rect.top, margin) + 'px';
+  }
+}
+
+function nextStep() {
+  if (currentStep < currentTour.length - 1) {
+    currentStep++;
+    showStep();
+  } else {
+    endTour();
+    document.getElementById('tourDoneModal').classList.add('active');
+  }
+}
+
+function prevStep() {
+  if (currentStep > 0) { currentStep--; showStep(); }
+}
+
+function endTour() {
+  document.getElementById('tourBg').classList.remove('active');
+  document.getElementById('tourPopup').classList.remove('active');
+  document.getElementById('tourSpotlight').style.opacity = '0';
+}
+
+function closeDone() {
+  document.getElementById('tourDoneModal').classList.remove('active');
+}
+
+/* 처음 방문 시 자동 시작 */
+window.addEventListener('load', () => {
+  setTimeout(startTourForCurrentTab, 500);
+});
+</script>
+</body>
+</html>

@@ -27,7 +27,7 @@ const notion = new NotionClient({ auth: process.env.NOTION_TOKEN });
 const NOTION_DB_ID = '221b622e-5115-4d07-b1fa-ed7fa52c6895'; // 상담 기록 DB
 
 const app  = express();
-const PORT = 3001;
+const PORT = process.env.PORT || 3001;
 
 // ── Anthropic 클라이언트 ──────────────────────────────────────
 // .env 파일에 ANTHROPIC_API_KEY=sk-ant-... 로 설정하거나

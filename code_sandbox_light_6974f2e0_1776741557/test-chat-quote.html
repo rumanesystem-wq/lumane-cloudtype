@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>루마네 채팅 + 견적서 테스트</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif; background: #f0f0f0; height: 100vh; display: flex; flex-direction: column; }
+
+  /* ── 헤더 ── */
+  .header {
+    background: #4c1d95; color: #fff;
+    padding: 12px 20px; font-size: 15px; font-weight: 700;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .header span { font-size: 11px; opacity: .7; font-weight: 400; }
+
+  /* ── 메인 2패널 ── */
+  .main { display: flex; flex: 1; overflow: hidden; gap: 8px; padding: 8px; }
+
+  /* ── 왼쪽: 견적서 ── */
+  .quote-panel {
+    width: 480px; min-width: 380px; background: #fff;
+    border-radius: 12px; display: flex; flex-direction: column;
+    box-shadow: 0 2px 12px rgba(0,0,0,.1); overflow: hidden;
+  }
+  .panel-title {
+    background: #f9fafb; border-bottom: 1px solid #e5e7eb;
+    padding: 12px 16px; font-size: 13px; font-weight: 700; color: #374151;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .panel-title .badge {
+    font-size: 10px; background: #ddd1f7; color: #4c1d95;
+    padding: 2px 8px; border-radius: 20px; font-weight: 600;
+  }
+  .quote-body { flex: 1; overflow-y: auto; padding: 16px; }
+
+  /* 견적서 테이블 */
+  .quote-title {
+    text-align: center; color: #C0504D; font-size: 16px; font-weight: 700;
+    padding: 10px; border: 1px solid #000; margin-bottom: 0;
+  }
+  .qt { width: 100%; border-collapse: collapse; font-size: 11px; }
+  .qt td { border: 1px solid #000; padding: 5px 7px; vertical-align: middle; min-height: 24px; }
+  .qt .lbl { background: #D9D9D9; font-weight: 700; text-align: center; white-space: nowrap; }
+  .qt .red-hd { background: #C0504D; color: #fff; font-weight: 700; text-align: center; font-size: 12px; }
+  .qt .gray-hd { background: #808080; color: #fff; font-weight: 700; text-align: center; }
+  .qt .plan-cell { height: 140px; }
+  .qt .footer-cell { background: #D9D9D9; text-align: center; font-size: 10px; font-weight: 700; }
+  .qt .val { color: #1d4ed8; font-weight: 600; transition: background .3s; }
+  .qt .val.updated { background: #fef9c3; }
+
+  /* 하단 버튼 */
+  .quote-footer {
+    padding: 12px 16px; border-top: 1px solid #e5e7eb;
+    display: flex; gap: 8px;
+  }
+  .btn-notion {
+    flex: 1; padding: 10px; border: none; border-radius: 8px;
+    background: #1f2937; color: #fff; font-size: 13px; font-weight: 600;
+    cursor: pointer; transition: opacity .2s;
+  }
+  .btn-notion:hover { opacity: .85; }
+  .btn-kakao {
+    flex: 1; padding: 10px; border: none; border-radius: 8px;
+    background: #FEE500; color: #181600; font-size: 13px; font-weight: 600;
+    cursor: pointer; transition: opacity .2s; text-decoration: none;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .btn-kakao:hover { opacity: .85; }
+
+  /* ── 오른쪽: 채팅 ── */
+  .chat-panel {
+    flex: 1; background: #fff; border-radius: 12px;
+    display: flex; flex-direction: column;
+    box-shadow: 0 2px 12px rgba(0,0,0,.1); overflow: hidden;
+  }
+  .chat-messages {
+    flex: 1; overflow-y: auto; padding: 16px;
+    display: flex; flex-direction: column; gap: 12px;
+    background: #f8f5ff;
+  }
+
+  /* 말풍선 */
+  .msg-row { display: flex; gap: 8px; align-items: flex-end; }
+  .msg-row.user { flex-direction: row-reverse; }
+  .avatar {
+    width: 32px; height: 32px; border-radius: 50%;
+    background: #7c3aed; color: #fff;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px; flex-shrink: 0;
+  }
+  .bubble {
+    max-width: 70%; padding: 10px 14px; border-radius: 16px;
+    font-size: 13px; line-height: 1.6; white-space: pre-wrap;
+  }
+  .bubble.bot { background: #fff; border: 1px solid #e5e7eb; border-bottom-left-radius: 4px; }
+  .bubble.user { background: #7c3aed; color: #fff; border-bottom-right-radius: 4px; }
+  .msg-time { font-size: 10px; color: #9ca3af; margin-bottom: 2px; }
+
+  /* 자동 반영 알림 */
+  .quote-update-notice {
+    text-align: center; font-size: 11px; color: #7c3aed;
+    background: #f5f3ff; border: 1px solid #ddd1f7;
+    border-radius: 8px; padding: 6px 12px; margin: 0 auto;
+  }
+
+  /* 입력창 */
+  .chat-input-area {
+    padding: 12px 16px; border-top: 1px solid #e5e7eb;
+    display: flex; gap: 8px; align-items: flex-end;
+  }
+  .chat-input {
+    flex: 1; border: 1px solid #d1d5db; border-radius: 10px;
+    padding: 10px 14px; font-size: 13px; resize: none;
+    font-family: inherit; outline: none; max-height: 100px;
+  }
+  .chat-input:focus { border-color: #7c3aed; }
+  .send-btn {
+    width: 40px; height: 40px; border-radius: 10px; border: none;
+    background: #7c3aed; color: #fff; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; font-size: 16px;
+    transition: background .2s;
+  }
+  .send-btn:hover { background: #5b21b6; }
+
+  /* 빠른 답변 버튼 */
+  .quick-btns { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+  .quick-btn {
+    font-size: 11px; padding: 5px 10px; border-radius: 16px;
+    border: 1px solid #7c3aed; color: #7c3aed; background: #fff;
+    cursor: pointer; transition: all .15s;
+  }
+  .quick-btn:hover { background: #7c3aed; color: #fff; }
+
+  /* 노션 저장 완료 토스트 */
+  .toast {
+    position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%);
+    background: #1f2937; color: #fff; padding: 10px 20px;
+    border-radius: 8px; font-size: 13px; opacity: 0;
+    transition: opacity .3s; pointer-events: none; z-index: 100;
+  }
+  .toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  🏠 케이트블랑 드레스룸
+  <span>채팅 + 견적서 자동 작성 테스트</span>
+</div>
+
+<div class="main">
+
+  <!-- 왼쪽: 견적서 패널 -->
+  <div class="quote-panel">
+    <div class="panel-title">
+      📋 견적서
+      <span class="badge" id="quoteBadge">작성 대기</span>
+    </div>
+    <div class="quote-body">
+      <div class="quote-title">케이트블랑 드레스룸 견적서</div>
+      <table class="qt">
+        <tr>
+          <td class="lbl" style="width:10%">고객명</td>
+          <td class="val" id="q_name" style="width:22%"></td>
+          <td class="lbl" style="width:8%">날짜</td>
+          <td class="val" id="q_date" style="width:14%"></td>
+          <td class="lbl" style="width:7%">전화</td>
+          <td class="val" id="q_phone"></td>
+        </tr>
+        <tr>
+          <td class="lbl">주소</td>
+          <td class="val" id="q_address" colspan="5"></td>
+        </tr>
+        <tr>
+          <td class="lbl">견적</td>
+          <td class="val" id="q_amount" colspan="2"></td>
+          <td class="lbl">결제방식</td>
+          <td class="val" id="q_payment" colspan="2"></td>
+        </tr>
+        <tr><td class="red-hd" colspan="6">주문내역</td></tr>
+        <tr>
+          <td class="lbl" rowspan="2">색상</td>
+          <td class="val" id="q_color" colspan="2" rowspan="2"></td>
+          <td class="lbl">천장</td>
+          <td class="val" id="q_ceiling" colspan="2"></td>
+        </tr>
+        <tr>
+          <td class="lbl">커튼박스</td>
+          <td class="val" id="q_curtain" colspan="2"></td>
+        </tr>
+        <tr>
+          <td class="lbl">내용</td>
+          <td class="val" id="q_structure" colspan="5"></td>
+        </tr>
+        <tr>
+          <td class="lbl" rowspan="3">추가 옵션</td>
+          <td class="lbl">2단 서랍</td><td class="val" id="q_drawer2"></td>
+          <td class="lbl">5단선반</td><td class="val" id="q_shelf5" colspan="2"></td>
+        </tr>
+        <tr>
+          <td class="lbl">3단 서랍</td><td class="val" id="q_drawer3"></td>
+          <td class="lbl">배송비</td><td class="val" id="q_delivery" colspan="2"></td>
+        </tr>
+        <tr>
+          <td class="lbl">기둥추가</td><td class="val" id="q_pillar"></td>
+          <td colspan="3"></td>
+        </tr>
+        <tr>
+          <td class="lbl">참고 사항</td>
+          <td class="val" id="q_notes" colspan="5" style="min-height:36px"></td>
+        </tr>
+        <tr><td class="gray-hd" colspan="6">평면도</td></tr>
+        <tr><td colspan="6" class="plan-cell"></td></tr>
+        <tr>
+          <td class="footer-cell">(주)루마네시스템</td>
+          <td class="footer-cell">기업은행<br>660-041655-04-011</td>
+          <td class="footer-cell" colspan="2">사업자번호 : 793-81-02453</td>
+          <td class="footer-cell" colspan="2">TEL 010-3784-5215</td>
+        </tr>
+      </table>
+    </div>
+    <div class="quote-footer">
+      <button class="btn-notion" onclick="saveToNotion()">📥 노션 DB 저장</button>
+      <a class="btn-kakao" href="https://pf.kakao.com/_xkTxnxj" target="_blank">💬 카톡 상담원 연결</a>
+    </div>
+  </div>
+
+  <!-- 오른쪽: 채팅 패널 -->
+  <div class="chat-panel">
+    <div class="panel-title">
+      💬 AI 상담
+      <span class="badge" style="background:#dcfce7;color:#166534;">온라인</span>
+    </div>
+    <div class="chat-messages" id="chatMessages"></div>
+    <div style="padding: 0 16px 8px;">
+      <div class="quick-btns" id="quickBtns"></div>
+    </div>
+    <div class="chat-input-area">
+      <textarea class="chat-input" id="chatInput" placeholder="메시지를 입력하세요" rows="1"
+        onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendMsg();}"></textarea>
+      <button class="send-btn" onclick="sendMsg()">➤</button>
+    </div>
+  </div>
+
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ── 견적 데이터 상태 ──────────────────────────────────────────
+const quoteData = {
+  name: '', phone: '', address: '', amount: '', payment: '',
+  color: '', ceiling: '', curtain: '', structure: '',
+  drawer2: '', drawer3: '', shelf5: '', delivery: '', pillar: '', notes: ''
+};
+
+// 오늘 날짜 자동
+document.getElementById('q_date').textContent = new Date().toLocaleDateString('ko-KR');
+
+// ── 견적서 필드 업데이트 ──────────────────────────────────────
+function updateQuote(fields) {
+  let updated = false;
+  for (const [key, val] of Object.entries(fields)) {
+    if (!val) continue;
+    quoteData[key] = val;
+    const el = document.getElementById('q_' + key);
+    if (el) {
+      el.textContent = val;
+      el.classList.add('updated');
+      setTimeout(() => el.classList.remove('updated'), 1200);
+      updated = true;
+    }
+  }
+  if (updated) {
+    document.getElementById('quoteBadge').textContent = '작성 중';
+    document.getElementById('quoteBadge').style.background = '#fef9c3';
+    document.getElementById('quoteBadge').style.color = '#92400e';
+  }
+}
+
+// ── 메시지 추가 ───────────────────────────────────────────────
+function addMsg(role, text, isNotice = false) {
+  const box = document.getElementById('chatMessages');
+  if (isNotice) {
+    const el = document.createElement('div');
+    el.className = 'quote-update-notice';
+    el.textContent = text;
+    box.appendChild(el);
+    box.scrollTop = box.scrollHeight;
+    return;
+  }
+  const row = document.createElement('div');
+  row.className = 'msg-row ' + role;
+  const now = new Date().toLocaleTimeString('ko-KR', {hour:'2-digit', minute:'2-digit'});
+  if (role === 'bot') {
+    row.innerHTML = `
+      <div class="avatar">🤖</div>
+      <div>
+        <div class="msg-time">${now}</div>
+        <div class="bubble bot">${text.replace(/\n/g,'<br>')}</div>
+      </div>`;
+  } else {
+    row.innerHTML = `
+      <div>
+        <div class="msg-time" style="text-align:right">${now}</div>
+        <div class="bubble user">${text}</div>
+      </div>
+      <div class="avatar" style="background:#d1fae5;color:#065f46">👤</div>`;
+  }
+  box.appendChild(row);
+  box.scrollTop = box.scrollHeight;
+}
+
+// ── 빠른 답변 버튼 ────────────────────────────────────────────
+function setQuickBtns(btns) {
+  const el = document.getElementById('quickBtns');
+  el.innerHTML = '';
+  btns.forEach(b => {
+    const btn = document.createElement('button');
+    btn.className = 'quick-btn';
+    btn.textContent = b;
+    btn.onclick = () => { sendMsg(b); };
+    el.appendChild(btn);
+  });
+}
+
+// ── 데모 대화 시나리오 ────────────────────────────────────────
+// AI가 고객 응답에서 데이터를 추출해 견적서에 자동 반영하는 흐름 시뮬레이션
+const scenario = [
+  {
+    trigger: null, // 초기 인사
+    bot: '안녕하세요~ 케이트블랑 드레스룸 상담 담당 루마네예요 :)\n어떤 공간에 설치 생각 중이세요? 안방인지, 별도 드레스룸인지랑 형태(일자/ㄱ자/ㄷ자)만 먼저 알려주시면 바로 안내드릴게요!',
+    quick: ['안방 ㄱ자형이요', '별도 드레스룸 일자형', '잘 모르겠어요'],
+    extract: {}
+  },
+  {
+    trigger: ['안방', 'ㄱ자', '일자', '드레스룸'],
+    bot: '안방 ㄱ자형이시군요! 치수를 알려주시면 정확한 견적을 드릴 수 있어요.\n가로×세로(mm) 형태로 알려주시면 좋아요 😊',
+    quick: ['2400×1800', '2700×2100', '3000×1500'],
+    extract: { structure: 'ㄱ자형' }
+  },
+  {
+    trigger: ['2400', '2700', '3000', '×', 'x', 'mm'],
+    bot: '치수 감사해요! 천장 높이도 알려주시겠어요?',
+    quick: ['2400mm', '2500mm', '2600mm', '2700mm'],
+    extract: (msg) => {
+      const m = msg.match(/(\d{3,4})[×x](\d{3,4})/);
+      return m ? { structure: `${m[1]}×${m[2]} ㄱ자형` } : {};
+    }
+  },
+  {
+    trigger: ['mm', '천장', '2400', '2500', '2600', '2700'],
+    bot: '커튼박스가 있으신가요? 있다면 높이도 알려주세요.',
+    quick: ['커튼박스 없음', '커튼박스 있음 200mm', '커튼박스 있음 250mm'],
+    extract: (msg) => {
+      const m = msg.match(/(\d{3,4})/);
+      return m ? { ceiling: m[1] + 'mm' } : {};
+    }
+  },
+  {
+    trigger: ['커튼박스', '없음', '있음'],
+    bot: '프레임 색상과 선반 색상을 선택해주세요!',
+    quick: ['화이트/화이트오크', '그레이/화이트오크', '블랙/월넛'],
+    extract: (msg) => {
+      const hasCurtain = msg.includes('있음');
+      const m = msg.match(/(\d{3})/);
+      return { curtain: hasCurtain ? (m ? m[1]+'mm' : '있음') : '없음' };
+    }
+  },
+  {
+    trigger: ['화이트', '그레이', '블랙', '색상', '/'],
+    bot: '추가 옵션이 필요하신가요?',
+    quick: ['2단 서랍 추가', '3단 서랍 추가', '옵션 없음'],
+    extract: (msg) => {
+      const parts = msg.split('/');
+      return parts.length >= 2
+        ? { color: `프레임: ${parts[0].trim()} / 선반: ${parts[1].trim()}` }
+        : { color: msg };
+    }
+  },
+  {
+    trigger: ['서랍', '옵션', '없음'],
+    bot: '성함과 연락처를 알려주시겠어요?',
+    quick: [],
+    extract: (msg) => {
+      const has2 = msg.includes('2단'); const has3 = msg.includes('3단');
+      return { drawer2: has2 ? '1개' : '', drawer3: has3 ? '1개' : '' };
+    }
+  },
+  {
+    trigger: ['이름', '김', '이', '박', '최', '010'],
+    bot: (msg) => {
+      const name = msg.match(/([가-힣]{2,4})/)?.[1] || '';
+      const phone = msg.match(/(010[-\s]?\d{4}[-\s]?\d{4})/)?.[1] || '';
+      return `감사합니다, ${name || '고객'}님! 😊\n지금까지 수집된 정보로 견적서를 작성했어요.\n왼쪽 견적서를 확인해보시겠어요?`;
+    },
+    quick: ['견적 금액 알고 싶어요', '노션에 저장해주세요'],
+    extract: (msg) => {
+      const name = msg.match(/([가-힣]{2,4})/)?.[1] || '';
+      const phone = msg.match(/(010[-\s]?\d{4}[-\s]?\d{4})/)?.[1] || '';
+      return { name, phone, delivery: '50,000원' };
+    }
+  },
+  {
+    trigger: ['견적', '금액', '저장'],
+    bot: '기본 견적은 **890,000원**입니다 (배송비 별도).\n노션 DB에 저장하시려면 왼쪽 하단 버튼을 눌러주세요!',
+    quick: [],
+    extract: { amount: '890,000원', payment: '계좌이체' }
+  }
+];
+
+let step = 0;
+
+function matchStep(msg) {
+  for (let i = step; i < scenario.length; i++) {
+    const s = scenario[i];
+    if (!s.trigger) continue;
+    if (s.trigger.some(t => msg.includes(t))) return i;
+  }
+  return -1;
+}
+
+function botReply(userMsg) {
+  const idx = matchStep(userMsg);
+  const s = idx >= 0 ? scenario[idx] : null;
+  if (!s) {
+    setTimeout(() => addMsg('bot', '조금 더 자세히 말씀해주시겠어요? 😊'), 600);
+    return;
+  }
+  step = idx + 1;
+
+  // 데이터 추출 & 견적서 반영
+  let extracted = {};
+  if (typeof s.extract === 'function') extracted = s.extract(userMsg);
+  else if (s.extract) extracted = s.extract;
+  if (Object.keys(extracted).some(k => extracted[k])) {
+    updateQuote(extracted);
+    setTimeout(() => addMsg(null, '✅ 견적서에 자동 반영됐어요', true), 400);
+  }
+
+  // 봇 응답
+  const reply = typeof s.bot === 'function' ? s.bot(userMsg) : s.bot;
+  setTimeout(() => {
+    addMsg('bot', reply);
+    setQuickBtns(s.quick || []);
+  }, 700);
+
+  // 마지막 단계면 배지 업데이트
+  if (step >= scenario.length - 1) {
+    document.getElementById('quoteBadge').textContent = '작성 완료';
+    document.getElementById('quoteBadge').style.background = '#dcfce7';
+    document.getElementById('quoteBadge').style.color = '#166534';
+  }
+}
+
+function sendMsg(preset) {
+  const input = document.getElementById('chatInput');
+  const text = preset || input.value.trim();
+  if (!text) return;
+  input.value = '';
+  document.getElementById('quickBtns').innerHTML = '';
+  addMsg('user', text);
+  botReply(text);
+}
+
+// 노션 저장 (테스트용 UI만)
+function saveToNotion() {
+  const toast = document.getElementById('toast');
+  toast.textContent = '📥 노션 DB에 저장했습니다! (테스트)';
+  toast.classList.add('show');
+  setTimeout(() => toast.classList.remove('show'), 2500);
+}
+
+// 초기 인사
+window.onload = () => {
+  const s = scenario[0];
+  setTimeout(() => {
+    addMsg('bot', s.bot);
+    setQuickBtns(s.quick);
+    step = 1;
+  }, 300);
+};
+</script>
+</body>
+</html>

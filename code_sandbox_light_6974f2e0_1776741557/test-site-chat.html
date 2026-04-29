@@ -1,0 +1,1493 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>케이트블랑 드레스룸 | 맞춤 드레스룸 설계·시공</title>
+  <meta name="description" content="내 공간에 딱 맞는 드레스룸. 맞춤 설계, 깔끔한 시공, 다양한 옵션으로 완성하는 케이트블랑 드레스룸." />
+  <link rel="stylesheet" href="css/style.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" />
+<style>
+/* ── AI 상담 페이지 추가 스타일 ── */
+.nav-link.nav-chat-link {
+  background: #c9a96e; color: #fff !important; font-weight: 600;
+  border-radius: 20px; padding: 5px 14px !important;
+  line-height: 1.4;
+}
+.nav-link.nav-chat-link:hover { background: #a8883f; }
+
+#page-chat {
+  min-height: calc(100vh - 64px);
+  background: #f4f1ec;
+  padding: 32px 16px 48px;
+}
+.chat-page-wrap { max-width: 1200px; margin: 0 auto; }
+.chat-page-header { margin-bottom: 24px; }
+.chat-page-header h1 {
+  font-family: 'Cormorant Garamond', Georgia, serif;
+  font-size: 28px; color: #2c2820; margin-bottom: 6px;
+}
+.chat-page-header p { color: #6b6056; font-size: 14px; }
+
+.chat-layout {
+  display: grid; grid-template-columns: 440px 1fr;
+  gap: 16px; height: calc(100vh - 64px - 140px); min-height: 580px;
+}
+@media (max-width: 900px) {
+  .chat-layout { grid-template-columns: 1fr; height: auto; }
+  .chat-quote-panel { max-height: 400px; }
+  .chat-main-panel { height: 520px; }
+}
+
+/* 견적서 패널 */
+.chat-quote-panel {
+  background: #fff; border-radius: 12px;
+  box-shadow: 0 4px 20px rgba(0,0,0,.10);
+  border: 1px solid #e4ddd2;
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.cpanel-head {
+  padding: 13px 16px; border-bottom: 1px solid #e4ddd2;
+  background: #faf9f7; display: flex; align-items: center; justify-content: space-between;
+}
+.cpanel-head-title { font-size: 13px; font-weight: 700; color: #2c2820; display: flex; align-items: center; gap: 6px; }
+.cpanel-head-title i { color: #c9a96e; }
+.cpanel-badge {
+  font-size: 10px; padding: 2px 10px; border-radius: 20px; font-weight: 600;
+  background: #f0ece4; color: #887e71; transition: all .3s;
+}
+.cpanel-badge.writing { background: #fef9c3; color: #92400e; }
+.cpanel-badge.done    { background: #dcfce7; color: #166534; }
+.quote-scroll-area { flex: 1; overflow-y: auto; padding: 14px; }
+
+/* 견적서 테이블 */
+.qsheet-title { text-align: center; color: #C0504D; font-size: 14px; font-weight: 700; padding: 8px; border: 1px solid #000; }
+.qsheet { width: 100%; border-collapse: collapse; font-size: 11px; }
+.qsheet td { border: 1px solid #000; padding: 5px 6px; vertical-align: middle; }
+.qsheet .ql  { background: #D9D9D9; font-weight: 700; text-align: center; white-space: nowrap; }
+.qsheet .qrh { background: #C0504D; color: #fff; font-weight: 700; text-align: center; font-size: 11px; }
+.qsheet .qgh { background: #808080; color: #fff; font-weight: 700; text-align: center; }
+.qsheet .qplan { height: 110px; }
+.qsheet .qft  { background: #D9D9D9; text-align: center; font-size: 9px; font-weight: 700; }
+.qsheet .qval { color: #1d4ed8; font-weight: 600; }
+.qsheet .qval.flash { animation: qflash .6s ease; }
+@keyframes qflash { 0%,100%{background:transparent} 40%{background:#fef08a} }
+
+.quote-action-bar {
+  padding: 11px 14px; border-top: 1px solid #e4ddd2;
+  display: flex; gap: 8px;
+}
+.qbtn-notion {
+  flex: 1; padding: 9px; border: none; border-radius: 8px;
+  background: #2c2820; color: #fff; font-size: 12px; font-weight: 600;
+  cursor: pointer; font-family: inherit; transition: opacity .2s;
+}
+.qbtn-notion:hover { opacity: .8; }
+.qbtn-kakao {
+  flex: 1; padding: 9px; border: none; border-radius: 8px;
+  background: #FEE500; color: #181600; font-size: 12px; font-weight: 600;
+  cursor: pointer; text-decoration: none;
+  display: flex; align-items: center; justify-content: center; gap: 5px;
+  transition: opacity .2s;
+}
+.qbtn-kakao:hover { opacity: .85; }
+
+/* 채팅 패널 */
+.chat-main-panel {
+  background: #fff; border-radius: 12px;
+  box-shadow: 0 4px 20px rgba(0,0,0,.10);
+  border: 1px solid #e4ddd2;
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.chat-msg-area {
+  flex: 1; overflow-y: auto; padding: 18px 14px;
+  background: #f8f5ff; display: flex; flex-direction: column; gap: 12px;
+}
+.cmsg-row { display: flex; gap: 8px; align-items: flex-end; }
+.cmsg-row.user { flex-direction: row-reverse; }
+.cmsg-avatar {
+  width: 32px; height: 32px; border-radius: 50%; flex-shrink: 0;
+  background: #c9a96e; color: #fff;
+  display: flex; align-items: center; justify-content: center; font-size: 14px;
+}
+.cmsg-bubble {
+  max-width: 72%; padding: 9px 13px; font-size: 13px;
+  line-height: 1.65; white-space: pre-wrap; border-radius: 16px;
+}
+.cmsg-bubble.bot { background: #fff; border: 1px solid #e4ddd2; border-bottom-left-radius: 4px; color: #2c2820; }
+.cmsg-bubble.user { background: #5b21b6; color: #fff; border-bottom-right-radius: 4px; }
+.cmsg-time { font-size: 10px; color: #9c9288; margin-bottom: 3px; }
+.cmsg-row.user .cmsg-time { text-align: right; }
+.chat-quote-notice {
+  text-align: center; font-size: 11px; color: #7c3aed;
+  background: #f5f3ff; border: 1px solid #ddd1f7;
+  border-radius: 8px; padding: 5px 12px; margin: 0 auto;
+}
+.chat-quick-row { padding: 6px 14px; display: flex; gap: 6px; flex-wrap: wrap; }
+.chat-qbtn {
+  font-size: 11px; padding: 5px 12px; border-radius: 20px;
+  border: 1px solid #c9a96e; color: #a8883f; background: #fff;
+  cursor: pointer; transition: all .15s; font-family: inherit;
+}
+.chat-qbtn:hover { background: #c9a96e; color: #fff; }
+.chat-input-row {
+  padding: 10px 14px; border-top: 1px solid #e4ddd2;
+  display: flex; gap: 8px; align-items: flex-end;
+}
+.chat-textarea {
+  flex: 1; border: 1px solid #e4ddd2; border-radius: 10px;
+  padding: 9px 13px; font-size: 13px; resize: none; max-height: 100px;
+  font-family: inherit; outline: none; background: #faf9f7;
+}
+.chat-textarea:focus { border-color: #c9a96e; }
+.chat-send-btn {
+  width: 38px; height: 38px; border-radius: 10px; border: none;
+  background: #c9a96e; color: #fff; cursor: pointer; font-size: 15px;
+  display: flex; align-items: center; justify-content: center; transition: background .2s;
+}
+.chat-send-btn:hover { background: #a8883f; }
+
+/* 토스트 */
+.chat-toast {
+  position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%);
+  background: #2c2820; color: #fff; padding: 10px 22px;
+  border-radius: 8px; font-size: 13px; opacity: 0;
+  transition: opacity .3s; pointer-events: none; z-index: 999;
+}
+.chat-toast.show { opacity: 1; }
+
+/* ── QF Form (AI상담 왼쪽 패널) ── */
+.qf-section-title { font-size:10.5px; font-weight:700; color:#c9a96e; letter-spacing:.4px; padding:2px 0 8px; }
+.qf-section-title.optional { color:#9c9288; margin-top:2px; }
+.qf-group { margin-bottom:11px; }
+.qf-label { font-size:11px; font-weight:600; color:#6b6056; display:block; margin-bottom:4px; }
+.qf-opt-note { font-weight:400; color:#9c9288; font-size:10.5px; }
+.qf-sub-label { font-size:10px; color:#9c9288; text-align:center; margin-bottom:3px; }
+.qf-input {
+  width:100%; padding:7px 10px; border:1.5px solid #e4ddd2; border-radius:8px;
+  font-size:12.5px; outline:none; font-family:inherit;
+  transition:border-color .2s, background .4s; box-sizing:border-box;
+}
+.qf-input:focus { border-color:#c9a96e; }
+.qf-input.qf-center { text-align:center; padding:7px 4px; }
+.qf-textarea { resize:vertical; min-height:64px; }
+.qf-select {
+  width:100%; padding:7px 10px; border:1.5px solid #e4ddd2; border-radius:8px;
+  font-size:12.5px; outline:none; font-family:inherit;
+  background:#fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23aaa'/%3E%3C/svg%3E") no-repeat right 10px center;
+  appearance:none; -webkit-appearance:none; transition:border-color .2s; box-sizing:border-box;
+}
+.qf-select:focus { border-color:#c9a96e; }
+.qf-row { display:flex; gap:10px; }
+.qf-row > .qf-group { flex:1; margin-bottom:0; }
+.qf-row-3 { display:flex; gap:8px; margin-bottom:0; }
+.qf-row-3 > div { flex:1; }
+.qf-btn-group { display:flex; flex-wrap:wrap; gap:6px; }
+.qf-layout-btn {
+  padding:5px 13px; border:1.5px solid #e4ddd2; border-radius:20px;
+  font-size:12px; background:#fff; cursor:pointer; font-family:inherit;
+  transition:all .15s; color:#2c2820;
+}
+.qf-layout-btn:hover { border-color:#c9a96e; }
+.qf-layout-btn.active { background:#c9a96e; color:#fff; border-color:#c9a96e; }
+.qf-check-group { display:flex; flex-wrap:wrap; gap:5px; }
+.qf-check-label {
+  display:flex; align-items:center; gap:5px; font-size:12px; color:#2c2820;
+  cursor:pointer; padding:5px 10px; border:1.5px solid #e4ddd2; border-radius:20px;
+  transition:all .15s; user-select:none;
+}
+.qf-check-label input[type=checkbox] { display:none; }
+.qf-check-label:has(input:checked) { background:#fef3dd; border-color:#c9a96e; color:#a8883f; }
+.qf-check-box { display:none; }
+.qf-file-area {
+  border:1.5px dashed #e4ddd2; border-radius:8px; padding:10px;
+  text-align:center; cursor:pointer; transition:border-color .2s;
+  font-size:12px; color:#9c9288; display:flex; flex-direction:column;
+  align-items:center; gap:3px;
+}
+.qf-file-area:hover { border-color:#c9a96e; color:#c9a96e; }
+.qf-divider { height:1px; background:#f0ece4; margin:6px 0 10px; }
+.qf-privacy-row { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:4px; margin-bottom:4px; }
+.qf-privacy-btn { background:none; border:none; font-size:11px; color:#9c9288; cursor:pointer; padding:2px 0; font-family:inherit; }
+.qf-privacy-btn:hover { color:#c9a96e; }
+.qf-privacy-detail { font-size:11px; color:#6b6056; background:#faf9f7; border-radius:8px; padding:10px; margin-top:4px; line-height:1.65; }
+.qf-privacy-detail p { margin:0 0 4px; }
+</style>
+</head>
+<body>
+
+  <!-- ===== 헤더 ===== -->
+  <header class="site-header" id="site-header">
+    <div class="header-inner">
+      <a href="#" class="logo" onclick="showPage('home'); return false;">
+        <span class="logo-main"><em>Kate Blanc</em></span>
+        <span class="logo-divider"></span>
+        <span class="logo-sub">Dressroom</span>
+      </a>
+      <nav class="main-nav" id="main-nav">
+        <a href="#" class="nav-link active" data-page="home" onclick="showPage('home'); return false;">홈</a>
+        <a href="#" class="nav-link" data-page="blog" onclick="showPage('blog'); return false;">블로그</a>
+        <a href="#" class="nav-link nav-chat-link" data-page="chat" onclick="showPage('chat'); return false;">💬 AI 상담</a>
+        <a href="#" class="nav-link" data-page="quote" onclick="showPage('quote'); return false;">견적요청</a>
+      </nav>
+      <div class="header-social">
+        <a href="http://pf.kakao.com/_qbxjwxb/" target="_blank" rel="noopener" class="header-social-btn header-kakao" title="카카오톡 채널">
+          <svg width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg"><ellipse cx="9" cy="8" rx="8" ry="6.4" fill="#3A1D1D"/><ellipse cx="9" cy="8" rx="8" ry="6.4" fill="#3C1E1E" fill-opacity="0"/><path d="M9 2C5.134 2 2 4.462 2 7.5c0 1.9 1.12 3.574 2.828 4.6L4.1 14.8a.3.3 0 0 0 .44.32l3.04-1.98C7.71 13.21 8.35 13.25 9 13.25c3.866 0 7-2.462 7-5.5S12.866 2 9 2Z" fill="currentColor"/></svg>
+          <span>카카오톡</span>
+        </a>
+        <a href="https://www.instagram.com/kateblanc_official/" target="_blank" rel="noopener" class="header-social-btn header-insta" title="인스타그램">
+          <i class="fab fa-instagram"></i>
+        </a>
+        <a href="tel:01037845215" class="header-social-btn header-phone" title="전화 문의">
+          <i class="fas fa-phone"></i>
+          <span>010-3784-5215</span>
+        </a>
+      </div>
+      <button class="hamburger" id="hamburger" aria-label="메뉴 열기" onclick="toggleMobileMenu()">
+        <span></span><span></span><span></span>
+      </button>
+    </div>
+    <div class="mobile-menu" id="mobile-menu">
+      <a href="#" onclick="showPage('home'); closeMobileMenu(); return false;">홈</a>
+      <a href="#" onclick="showPage('blog'); closeMobileMenu(); return false;">블로그</a>
+      <a href="#" onclick="showPage('chat'); closeMobileMenu(); return false;">💬 AI 상담</a>
+      <a href="#" onclick="showPage('quote'); closeMobileMenu(); return false;">견적요청</a>
+      <div class="mobile-menu-social">
+        <a href="http://pf.kakao.com/_qbxjwxb/" target="_blank" rel="noopener" class="mobile-social-link kakao"><i class="fas fa-comment-dots"></i> 카카오톡 채널</a>
+        <a href="https://www.instagram.com/kateblanc_official/" target="_blank" rel="noopener" class="mobile-social-link insta"><i class="fab fa-instagram"></i> 인스타그램</a>
+        <a href="tel:01037845215" class="mobile-social-link phone"><i class="fas fa-phone"></i> 010-3784-5215</a>
+      </div>
+    </div>
+  </header>
+
+  <main id="app">
+
+    <!-- ========== [홈] ========== -->
+    <div id="page-home" class="page active">
+
+      <!-- 히어로 섹션 -->
+      <section class="hero-section">
+        <div class="hero-bg-img" style="background-image:url('images/product-1.jpg');"></div>
+        <div class="hero-overlay"></div>
+        <div class="hero-content">
+          <div class="hero-badge"><i class="fas fa-circle" style="font-size:5px;"></i> Kate Blanc Dressroom</div>
+          <h1 class="hero-title">내 공간에 딱 맞는<br><strong>드레스룸</strong></h1>
+          <p class="hero-sub">맞춤 설계 &nbsp;·&nbsp; 깔끔한 시공 &nbsp;·&nbsp; 다양한 옵션</p>
+          <div class="hero-btns">
+            <a href="#" class="btn btn-primary" onclick="showPage('quote'); return false;">
+              <i class="fas fa-pencil-ruler"></i> 견적요청
+            </a>
+            <a href="#" class="btn btn-ghost" onclick="showPage('chat'); return false;">
+              <i class="fas fa-robot"></i> AI 상담으로 견적받기
+            </a>
+          </div>
+        </div>
+        <div class="hero-scroll-hint">
+          <span>스크롤하여 더 보기</span>
+          <i class="fas fa-chevron-down"></i>
+        </div>
+      </section>
+
+      <!-- 브랜드 소개 -->
+      <section class="section brand-section">
+        <div class="container">
+          <div class="brand-layout">
+            <div class="brand-img-wrap">
+              <img src="images/product-2.jpg" alt="케이트블랑 드레스룸 서랍장 디테일" class="brand-img" loading="lazy" />
+              <div class="brand-img-badge">
+                <i class="fas fa-award"></i>
+                <span>2년 무상 A/S</span>
+              </div>
+            </div>
+            <div class="brand-text">
+              <div class="section-badge">About</div>
+              <h2 class="section-title">케이트블랑 드레스룸이란?</h2>
+              <p class="brand-desc">
+                케이트블랑은 고객의 생활 패턴과 공간 특성을 분석하여 <strong>최적의 드레스룸</strong>을 설계·시공하는 전문 브랜드입니다.
+              </p>
+              <p class="brand-desc">
+                공장에서 정밀 제작한 모듈을 현장에서 조립하는 방식으로, 낭비 없이 <strong>빠르고 깔끔한 시공</strong>을 제공합니다.
+              </p>
+              <div class="brand-stats">
+                <div class="stat-item">
+                  <span class="stat-num">1,200<span class="stat-plus">+</span></span>
+                  <span class="stat-label">시공 완료</span>
+                </div>
+                <div class="stat-divider"></div>
+                <div class="stat-item">
+                  <span class="stat-num">4.9<span class="stat-plus">★</span></span>
+                  <span class="stat-label">고객 만족도</span>
+                </div>
+                <div class="stat-divider"></div>
+                <div class="stat-item">
+                  <span class="stat-num">2년</span>
+                  <span class="stat-label">무상 A/S</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 핵심 장점 4가지 -->
+      <section class="section advantage-section">
+        <div class="container">
+          <div class="section-badge">Why Kate Blanc</div>
+          <h2 class="section-title">케이트블랑을 선택하는 이유</h2>
+          <div class="advantage-grid">
+            <div class="advantage-card">
+              <div class="adv-icon"><i class="fas fa-ruler-combined"></i></div>
+              <h3>공간 맞춤 모듈</h3>
+              <p>가로·세로·높이를 mm 단위로 설계해 어떤 공간도 꼭 맞게 채웁니다.</p>
+            </div>
+            <div class="advantage-card">
+              <div class="adv-icon"><i class="fas fa-puzzle-piece"></i></div>
+              <h3>자유로운 옵션 확장</h3>
+              <p>아일랜드장·거울장 등 원하는 옵션을 자유롭게 추가하고 빼세요.</p>
+            </div>
+            <div class="advantage-card">
+              <div class="adv-icon"><i class="fas fa-star"></i></div>
+              <h3>깔끔한 마감</h3>
+              <p>엣지 마감재부터 힌지·레일까지 디테일을 놓치지 않는 완성도 높은 시공.</p>
+            </div>
+            <div class="advantage-card">
+              <div class="adv-icon"><i class="fas fa-box-open"></i></div>
+              <h3>실사용 중심 수납</h3>
+              <p>옷 길이별 행거, 서랍 깊이, 선반 간격까지 실생활 동선을 고려해 설계합니다.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 옵션/구성 소개 -->
+      <section class="section options-section">
+        <div class="container">
+          <div class="section-badge">Options</div>
+          <h2 class="section-title">구성 옵션 안내</h2>
+          <p class="section-sub">필요한 옵션만 골라 나만의 드레스룸을 완성하세요.</p>
+          <div class="options-grid">
+            <div class="option-card option-card--img">
+              <div class="option-card-photo">
+                <img src="images/option-island.jpg" alt="아일랜드장" loading="lazy" />
+              </div>
+              <div class="option-card-body">
+                <h4>아일랜드장</h4>
+                <p>가운데 배치형 수납·작업대. 서랍 구성으로 활용도 극대화.</p>
+                <span class="option-badge">인기</span>
+              </div>
+            </div>
+            <div class="option-card option-card--img">
+              <div class="option-card-photo">
+                <img src="images/option-mirror.jpg" alt="거울장" loading="lazy" />
+              </div>
+              <div class="option-card-body">
+                <h4>거울장</h4>
+                <p>전신 거울 + 수납 일체형. 공간을 넓어 보이게 하는 효과.</p>
+              </div>
+            </div>
+            <div class="option-card option-card--img">
+              <div class="option-card-photo">
+                <img src="images/option-2drawer.jpg" alt="2단 서랍장" loading="lazy" />
+              </div>
+              <div class="option-card-body">
+                <h4>2단 서랍장</h4>
+                <p>자주 꺼내 쓰는 의류를 서랍 안에 깔끔하게 보관.</p>
+              </div>
+            </div>
+            <div class="option-card option-card--img">
+              <div class="option-card-photo">
+                <img src="images/option-3drawer.jpg" alt="3단 서랍장" loading="lazy" />
+              </div>
+              <div class="option-card-body">
+                <h4>3단 서랍장</h4>
+                <p>대용량 수납이 필요할 때. 속옷·양말·소품 분류에 최적.</p>
+              </div>
+            </div>
+            <div class="option-card option-card--img">
+              <div class="option-card-photo">
+                <img src="images/option-accessory.jpg" alt="악세사리장" loading="lazy" />
+              </div>
+              <div class="option-card-body">
+                <h4>악세사리장</h4>
+                <p>주얼리·넥타이·스카프를 한눈에. 소품 관리가 훨씬 편해집니다.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 시공 과정 -->
+      <section class="section process-section">
+        <div class="container">
+          <div class="section-badge">Process</div>
+          <h2 class="section-title">시공·설치 과정</h2>
+          <p class="section-sub">복잡한 과정 없이 4단계로 드레스룸이 완성됩니다.</p>
+          <div class="process-steps">
+            <div class="step-item">
+              <div class="step-num">01</div>
+              <div class="step-content">
+                <h4>견적 상담</h4>
+                <p>공간 사이즈와 원하는 구성을 알려주시면 맞춤 견적을 안내드립니다.</p>
+              </div>
+              <div class="step-arrow"><i class="fas fa-chevron-down"></i></div>
+            </div>
+            <div class="step-item">
+              <div class="step-num">02</div>
+              <div class="step-content">
+                <h4>3D 도면 설계</h4>
+                <p>전담 디자이너가 3D 도면으로 배치를 시각화하여 확인시켜 드립니다.</p>
+              </div>
+              <div class="step-arrow"><i class="fas fa-chevron-down"></i></div>
+            </div>
+            <div class="step-item">
+              <div class="step-num">03</div>
+              <div class="step-content">
+                <h4>공장 제작</h4>
+                <p>확정된 도면 그대로 공장에서 정밀 제작합니다. 현장 재단 없이 깔끔한 시공.</p>
+              </div>
+              <div class="step-arrow"><i class="fas fa-chevron-down"></i></div>
+            </div>
+            <div class="step-item last">
+              <div class="step-num">04</div>
+              <div class="step-content">
+                <h4>현장 설치 완료</h4>
+                <p>숙련된 기사가 빠르고 깔끔하게 설치 후 마감 검수까지 완료합니다.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 시공 후기 블로그 링크 -->
+      <section class="section blog-link-section">
+        <div class="container">
+          <div class="blog-link-inner">
+            <div class="blog-link-text">
+              <div class="section-badge">시공 후기</div>
+              <h2 class="section-title" style="margin-bottom:12px;">실제 고객 시공 후기를<br>블로그에서 확인하세요</h2>
+              <p class="section-sub" style="margin-bottom:28px;">1자형 · ㄱ자형 · ㄷ자형 · 11자형까지<br>다양한 공간에 맞춘 실제 시공 사진과 후기를 담았습니다.</p>
+              <div class="blog-link-btns">
+                <a href="https://blog.naver.com/kateblanc_" target="_blank" rel="noopener" class="btn btn-gold">
+                  <i class="fas fa-blog"></i> 블로그 시공후기 보기
+                </a>
+                <a href="#" class="btn btn-outline" onclick="showPage('blog'); return false;">
+                  <i class="fas fa-th-large"></i> 블로그 탭으로 이동
+                </a>
+              </div>
+            </div>
+            <div class="blog-link-images">
+              <div class="blog-link-img-grid">
+                <div class="bli-img bli-img--tall"><img src="images/product-1.jpg" alt="케이트블랑 ㄷ자형 드레스룸" loading="lazy" /></div>
+                <div class="bli-img"><img src="images/product-3.jpg" alt="케이트블랑 블랙 프레임 드레스룸" loading="lazy" /></div>
+                <div class="bli-img"><img src="images/product-5.jpg" alt="케이트블랑 2단 서랍장" loading="lazy" /></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- FAQ -->
+      <section class="section faq-section">
+        <div class="container">
+          <div class="section-badge">FAQ</div>
+          <h2 class="section-title">자주 묻는 질문</h2>
+          <div class="faq-list">
+            <div class="faq-item">
+              <button class="faq-q" onclick="toggleFaq(this)">
+                <span>견적은 어떻게 받나요?</span>
+                <i class="fas fa-chevron-down faq-icon"></i>
+              </button>
+              <div class="faq-a">
+                <p>홈페이지의 <strong>견적요청 페이지</strong>에서 공간 사이즈와 희망 구성을 입력해 주시면, 담당자가 확인 후 빠르게 연락드립니다. 평균 응답 시간은 영업일 기준 1~2일 이내입니다.</p>
+              </div>
+            </div>
+            <div class="faq-item">
+              <button class="faq-q" onclick="toggleFaq(this)">
+                <span>맞춤 사이즈도 가능한가요?</span>
+                <i class="fas fa-chevron-down faq-icon"></i>
+              </button>
+              <div class="faq-a">
+                <p>네, 가능합니다. 케이트블랑은 mm 단위 맞춤 설계가 기본입니다. 특이한 천장 구조, 경사, 기둥 등이 있어도 현장 실측 후 최적의 도면을 제안드립니다.</p>
+              </div>
+            </div>
+            <div class="faq-item">
+              <button class="faq-q" onclick="toggleFaq(this)">
+                <span>설치 시간은 얼마나 걸리나요?</span>
+                <i class="fas fa-chevron-down faq-icon"></i>
+              </button>
+              <div class="faq-a">
+                <p>일반적인 1자형 기준 4~6시간, ㄱ자·ㄷ자 구성은 8~12시간 내외입니다. 옵션 수에 따라 달라질 수 있으며, 당일 시공 완료를 원칙으로 합니다.</p>
+              </div>
+            </div>
+            <div class="faq-item">
+              <button class="faq-q" onclick="toggleFaq(this)">
+                <span>이사·이전 설치가 가능한가요?</span>
+                <i class="fas fa-chevron-down faq-icon"></i>
+              </button>
+              <div class="faq-a">
+                <p>모듈형 구조이므로 이사 시 해체 후 재설치가 가능합니다. 단, 새로운 공간 사이즈에 따라 일부 패널 추가 또는 조정 비용이 발생할 수 있습니다. 상담 시 문의해 주세요.</p>
+              </div>
+            </div>
+            <div class="faq-item">
+              <button class="faq-q" onclick="toggleFaq(this)">
+                <span>A/S는 어떻게 진행되나요?</span>
+                <i class="fas fa-chevron-down faq-icon"></i>
+              </button>
+              <div class="faq-a">
+                <p>시공 완료일로부터 <strong>2년간 무상 A/S</strong>를 제공합니다. 힌지·레일·서랍 등 소모성 부품도 A/S 대상에 포함됩니다. 연락처로 문의 주시면 신속히 방문 처리해 드립니다.</p>
+              </div>
+            </div>
+            <div class="faq-item">
+              <button class="faq-q" onclick="toggleFaq(this)">
+                <span>선택할 수 있는 옵션은 무엇이 있나요?</span>
+                <i class="fas fa-chevron-down faq-icon"></i>
+              </button>
+              <div class="faq-a">
+                <p>아일랜드장, 거울장, 2단 서랍장, 3단 서랍장, 악세사리장을 선택할 수 있습니다. 프레임 색상은 화이트·블랙·실버·골드 중 선택, 선반 색상은 솔리드화이트·화이트오크·스톤그레이·진그레이·다크월넛·기타(직접 입력)로 구성됩니다.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- AI 상담 섹션 -->
+      <section class="section" style="background:#f5e9cc; padding:60px 24px;">
+        <div class="container" style="max-width:720px;">
+          <div style="text-align:center; margin-bottom:24px;">
+            <div class="section-badge">AI 상담</div>
+            <h2 style="font-family:'Cormorant Garamond',Georgia,serif; font-size:28px; color:#2c2820; margin:10px 0 8px;">지금 바로 상담해보세요</h2>
+            <p style="color:#6b6056; font-size:14px;">공간 정보를 알려주시면 맞춤 안내를 드립니다.</p>
+          </div>
+          <!-- 채팅 패널 -->
+          <div style="background:#fff; border-radius:14px; box-shadow:0 4px 24px rgba(0,0,0,.10); overflow:hidden; display:flex; flex-direction:column; height:800px;">
+            <!-- 헤더 -->
+            <div style="padding:12px 16px; background:linear-gradient(135deg,#2c2820,#3d3028); display:flex; align-items:center; gap:10px; flex-shrink:0;">
+              <div style="width:32px;height:32px;border-radius:50%;background:linear-gradient(135deg,#c9a96e,#a8883f);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:#fff;">AI</div>
+              <div>
+                <div style="color:#fff;font-size:13px;font-weight:600;">루마네 상담원</div>
+                <div style="color:#c9a96e;font-size:11px;">케이트블랑 드레스룸 · AI 상담</div>
+              </div>
+              <div style="margin-left:auto;display:flex;align-items:center;gap:8px;">
+                <button onclick="hcShowHistory()" title="이전 상담" style="background:rgba(255,255,255,.15);border:none;color:#fff;font-size:11px;padding:4px 10px;border-radius:20px;cursor:pointer;">📋 이전 상담</button>
+                <button onclick="hcClear()" title="새 대화" style="background:rgba(255,255,255,.15);border:none;color:#fff;font-size:11px;padding:4px 10px;border-radius:20px;cursor:pointer;">＋ 새 대화</button>
+                <div style="display:flex;align-items:center;gap:5px;">
+                  <div style="width:7px;height:7px;border-radius:50%;background:#4ade80;"></div>
+                  <span style="color:#9ca3af;font-size:11px;">온라인</span>
+                </div>
+              </div>
+            </div>
+            <!-- 메시지 영역 -->
+            <div id="homeChatMsgs" style="flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:10px;background:#faf9f7;">
+              <div class="dc-bot-row">
+                <div class="dc-av">AI</div>
+                <div class="dc-bubble dc-bot">안녕하세요! 😊<br>케이트블랑 드레스룸 AI 상담원 루마네입니다.<br><br>먼저 성함을 알려주시겠어요?</div>
+              </div>
+            </div>
+            <!-- 빠른 답변 -->
+            <div id="homeChatQuick" style="padding:6px 12px;display:flex;gap:6px;flex-wrap:wrap;background:#fff;border-top:1px solid #f0ece4;"></div>
+            <!-- 입력 바 -->
+            <div style="padding:10px 12px;border-top:1px solid #e4ddd2;display:flex;gap:8px;align-items:flex-end;background:#fff;flex-shrink:0;">
+              <input type="file" id="homeChatFile" accept="image/*" style="display:none;" onchange="hcFileSelected(this)">
+              <button onclick="document.getElementById('homeChatFile').click()" title="사진 첨부"
+                style="width:38px;height:38px;border-radius:10px;border:1px solid #e4ddd2;background:#f9f9f9;font-size:18px;cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center;">＋</button>
+              <textarea id="homeChatInp" rows="1" placeholder="메시지를 입력하세요"
+                style="flex:1;border:1.5px solid #e4ddd2;border-radius:10px;padding:9px 12px;font-size:13px;resize:none;font-family:inherit;outline:none;max-height:90px;line-height:1.5;"
+                onfocus="this.style.borderColor='#c9a96e'" onblur="this.style.borderColor='#e4ddd2'"
+                oninput="dcResizeInp(this); document.getElementById('homeChatSend').disabled=!this.value.trim();"
+                onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();hcSend();}"
+              ></textarea>
+              <button id="homeChatSend" onclick="hcSend()" disabled
+                style="width:38px;height:38px;border-radius:10px;border:none;background:linear-gradient(135deg,#c9a96e,#a8883f);color:#fff;font-size:15px;cursor:pointer;flex-shrink:0;transition:opacity .2s;"
+                onmouseover="if(!this.disabled)this.style.opacity='.8'" onmouseout="this.style.opacity='1'">➤</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 하단 CTA -->
+      <section class="section bottom-cta-section">
+        <div class="container">
+          <div class="bottom-cta-card">
+            <div class="bottom-cta-icon"><i class="fas fa-clipboard-list"></i></div>
+            <h2>지금 견적요청을 남기면<br>빠르게 안내드려요</h2>
+            <p>공간 사이즈만 알려주시면 맞춤 견적을 드립니다.</p>
+            <div class="cta-btn-group">
+              <a href="#" class="btn btn-primary btn-lg" onclick="showPage('quote'); return false;">
+                <i class="fas fa-pencil-ruler"></i> 견적요청 작성하기
+              </a>
+              <a href="http://pf.kakao.com/_qbxjwxb/" target="_blank" rel="noopener" class="btn btn-kakao btn-lg">
+                <i class="fas fa-comment-dots"></i> 카카오톡 채널 상담
+              </a>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </div><!-- /page-home -->
+
+    <!-- 홈 채팅 견적 요약 모달 -->
+    <div id="hcQuoteModal" onclick="if(event.target===this)this.style.display='none'"
+      style="display:none;position:fixed;inset:0;z-index:9000;background:rgba(0,0,0,.45);align-items:center;justify-content:center;">
+      <div style="background:#fff;border-radius:16px;padding:28px 28px 24px;width:480px;max-width:95vw;max-height:85vh;overflow-y:auto;box-shadow:0 8px 40px rgba(0,0,0,.2);">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
+          <h3 style="font-size:16px;font-weight:700;color:#2c2820;">📋 상담 내용 요약</h3>
+          <button onclick="document.getElementById('hcQuoteModal').style.display='none'" style="background:none;border:none;font-size:20px;cursor:pointer;color:#9ca3af;">✕</button>
+        </div>
+        <table style="width:100%;border-collapse:collapse;font-size:13px;">
+          <tbody id="hcQuoteBody"></tbody>
+        </table>
+        <div style="display:flex;gap:8px;margin-top:20px;">
+          <button onclick="hcPrintQuote()" style="flex:1;padding:11px;background:#2c2820;color:#fff;border:none;border-radius:10px;font-size:13px;font-weight:600;cursor:pointer;">🖨 인쇄</button>
+          <button onclick="showPage('quote')" style="flex:1;padding:11px;background:linear-gradient(135deg,#c9a96e,#a8883f);color:#fff;border:none;border-radius:10px;font-size:13px;font-weight:600;cursor:pointer;">견적요청 작성하기 →</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 홈 채팅 이전 상담 내역 모달 -->
+    <div id="hcHistoryModal" onclick="if(event.target===this)this.style.display='none'"
+      style="display:none;position:fixed;inset:0;z-index:9000;background:rgba(0,0,0,.45);align-items:center;justify-content:center;">
+      <div style="background:#fff;border-radius:16px;padding:28px;width:480px;max-width:95vw;max-height:85vh;overflow-y:auto;box-shadow:0 8px 40px rgba(0,0,0,.2);">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+          <h3 style="font-size:16px;font-weight:700;color:#2c2820;">📋 이전 상담 내역</h3>
+          <button onclick="document.getElementById('hcHistoryModal').style.display='none'" style="background:none;border:none;font-size:20px;cursor:pointer;color:#9ca3af;">✕</button>
+        </div>
+        <div id="hcHistoryBody" style="font-size:13px;color:#4b4540;"></div>
+        <div style="margin-top:16px;text-align:right;">
+          <button onclick="document.getElementById('hcHistoryModal').style.display='none'" style="padding:9px 20px;background:#f3f4f6;color:#374151;border:none;border-radius:10px;font-size:13px;cursor:pointer;">닫기</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ========== [블로그] ========== -->
+    <div id="page-blog" class="page">
+
+      <section class="blog-hero-section">
+        <div class="blog-hero-img" style="background-image:url('images/product-4.jpg');"></div>
+        <div class="blog-hero-overlay"></div>
+        <div class="container blog-hero-content">
+          <div class="section-badge" style="background:rgba(255,255,255,.2); color:#fff;">Blog</div>
+          <h1 class="blog-hero-title">Kate Blanc Blog</h1>
+          <p class="blog-hero-sub">시공 후기 · 드레스룸 정보 · 공간 아이디어를 확인하세요.</p>
+          <a href="https://blog.naver.com/kateblanc_" target="_blank" rel="noopener" class="naver-blog-btn">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="margin-right:8px;flex-shrink:0;">
+              <rect width="24" height="24" rx="4" fill="#03C75A"/>
+              <path d="M13.85 12.3L10.1 6H7V18H10.15V11.7L13.9 18H17V6H13.85V12.3Z" fill="white"/>
+            </svg>
+            네이버 블로그 바로가기
+          </a>
+        </div>
+      </section>
+
+      <section class="section blog-posts-section">
+        <div class="container">
+          <h2 class="section-title-sm">최근 게시글</h2>
+          <div class="blog-grid">
+            <a href="https://blog.naver.com/kateblanc_" target="_blank" rel="noopener" class="blog-card">
+              <div class="blog-thumb"><img src="images/product-1.jpg" alt="24평 아파트 드레스룸 시공 후기" loading="lazy" /></div>
+              <div class="blog-card-body">
+                <span class="blog-badge badge-review">시공후기</span>
+                <h3>24평 아파트 안방 드레스룸 시공 후기 — 1자형 + 아일랜드</h3>
+                <p class="blog-excerpt">좁은 안방에 딱 맞게 설계된 1자형 드레스룸과 아일랜드장 조합. 실제 시공 과정과 완성 후 사용 소감을 솔직하게 담았습니다.</p>
+                <span class="blog-date">2025.01.08</span>
+              </div>
+            </a>
+            <a href="https://blog.naver.com/kateblanc_" target="_blank" rel="noopener" class="blog-card">
+              <div class="blog-thumb"><img src="images/product-3.jpg" alt="ㄱ자형 드레스룸" loading="lazy" /></div>
+              <div class="blog-card-body">
+                <span class="blog-badge badge-review">시공후기</span>
+                <h3>ㄱ자형 드레스룸으로 수납 공간을 두 배로 — 32평 신축 아파트</h3>
+                <p class="blog-excerpt">코너 공간을 최대한 활용하는 ㄱ자형 구성. 거울장과 화장대까지 넣었는데도 공간이 훨씬 넓어 보이는 비결.</p>
+                <span class="blog-date">2024.12.20</span>
+              </div>
+            </a>
+            <a href="https://blog.naver.com/kateblanc_" target="_blank" rel="noopener" class="blog-card">
+              <div class="blog-thumb"><img src="images/product-4.jpg" alt="드레스룸 설계 전" loading="lazy" /></div>
+              <div class="blog-card-body">
+                <span class="blog-badge badge-info">정보</span>
+                <h3>드레스룸 설계 전에 꼭 알아야 할 5가지</h3>
+                <p class="blog-excerpt">공간 측정 방법, 행거 높이 기준, 서랍 깊이 선택, 색상 조합 팁까지. 처음 드레스룸을 만드는 분들을 위한 가이드.</p>
+                <span class="blog-date">2024.12.05</span>
+              </div>
+            </a>
+            <a href="https://blog.naver.com/kateblanc_" target="_blank" rel="noopener" class="blog-card">
+              <div class="blog-thumb"><img src="images/product-5.jpg" alt="드레스룸 색상" loading="lazy" /></div>
+              <div class="blog-card-body">
+                <span class="blog-badge badge-tip">팁</span>
+                <h3>드레스룸 색상 조합 추천 — 화이트·그레이·블랙 스타일링</h3>
+                <p class="blog-excerpt">프레임과 선반 색상 조합에 따라 전혀 다른 분위기가 연출됩니다. 톤별 실제 시공 사례와 함께 비교해드립니다.</p>
+                <span class="blog-date">2024.11.18</span>
+              </div>
+            </a>
+            <a href="https://blog.naver.com/kateblanc_" target="_blank" rel="noopener" class="blog-card">
+              <div class="blog-thumb"><img src="images/product-2.jpg" alt="ㄷ자형 드레스룸" loading="lazy" /></div>
+              <div class="blog-card-body">
+                <span class="blog-badge badge-review">시공후기</span>
+                <h3>ㄷ자형 드레스룸 전체 시공 — 가족 4인 수납 대용량 구성</h3>
+                <p class="blog-excerpt">어른·아이 옷장을 한 공간에 모두 넣은 ㄷ자형 대용량 드레스룸. 2단·3단 서랍 조합과 전신 거울장 배치 후기.</p>
+                <span class="blog-date">2024.11.03</span>
+              </div>
+            </a>
+            <a href="https://blog.naver.com/kateblanc_" target="_blank" rel="noopener" class="blog-card">
+              <div class="blog-thumb"><img src="images/product-3.jpg" alt="아일랜드장" loading="lazy" /></div>
+              <div class="blog-card-body">
+                <span class="blog-badge badge-tip">팁</span>
+                <h3>아일랜드장 있는 드레스룸 — 정말 필요할까요?</h3>
+                <p class="blog-excerpt">아일랜드장의 장점과 단점, 설치 가능한 최소 공간 기준, 실제 사용 후기를 정리했습니다.</p>
+                <span class="blog-date">2024.10.22</span>
+              </div>
+            </a>
+          </div>
+          <div class="blog-more-wrap">
+            <a href="https://blog.naver.com/kateblanc_" target="_blank" rel="noopener" class="btn btn-outline-gold">
+              <i class="fab fa-naver"></i> 네이버 블로그에서 전체 글 보기
+            </a>
+          </div>
+        </div>
+      </section>
+
+      <section class="section bottom-cta-section">
+        <div class="container">
+          <div class="bottom-cta-card">
+            <div class="bottom-cta-icon"><i class="fas fa-clipboard-list"></i></div>
+            <h2>마음에 드는 시공 사례가 있으셨나요?</h2>
+            <p>비슷한 구성으로 견적을 요청해 보세요.</p>
+            <div class="cta-btn-group">
+              <a href="#" class="btn btn-primary btn-lg" onclick="showPage('quote'); return false;"><i class="fas fa-pencil-ruler"></i> 견적요청 남기기</a>
+              <a href="http://pf.kakao.com/_qbxjwxb/" target="_blank" rel="noopener" class="btn btn-kakao btn-lg"><i class="fas fa-comment-dots"></i> 카카오톡 채널 상담</a>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </div><!-- /page-blog -->
+
+
+    <!-- ========== [견적요청] ========== -->
+    <div id="page-quote" class="page" style="
+      padding:24px 28px; background:#f5e9cc;
+      display:flex; justify-content:center;
+      box-sizing:border-box; min-height:calc(100vh - 64px);
+    ">
+      <div style="width:100%; max-width:680px;">
+
+        <!-- 견적 폼 -->
+        <div style="flex:3; min-width:0; background:#fff; border-radius:14px; box-shadow:0 4px 24px rgba(0,0,0,.10); overflow:hidden; padding:32px 36px 40px;">
+          <div class="section-badge">Quote</div>
+          <h1 class="page-title">견적요청</h1>
+          <p class="page-sub">기본 정보만 남겨주시면 확인 후 연락드릴게요.</p>
+
+          <div class="quote-success" id="quote-success">
+            <div class="success-icon"><i class="fas fa-check-circle"></i></div>
+            <h2>접수되었습니다</h2>
+            <p>확인 후 연락드리겠습니다.<br>평균 응답 시간은 영업일 기준 1~2일 이내입니다.</p>
+            <button class="btn btn-outline-gold" onclick="resetQuoteForm()">다시 작성하기</button>
+          </div>
+
+          <form class="quote-form" id="quote-form" onsubmit="submitQuote(event)" novalidate>
+            <div class="form-group-title"><i class="fas fa-asterisk"></i> 필수 입력 항목</div>
+            <div class="form-row">
+              <div class="form-group">
+                <label for="q-name">이름 <span class="req">*</span></label>
+                <input type="text" id="q-name" name="name" placeholder="홍길동" required />
+                <span class="field-error" id="err-name"></span>
+              </div>
+              <div class="form-group">
+                <label for="q-phone">연락처 <span class="req">*</span></label>
+                <input type="tel" id="q-phone" name="phone" placeholder="010-0000-0000" required />
+                <span class="field-error" id="err-phone"></span>
+              </div>
+            </div>
+            <div class="form-group">
+              <label for="q-region">설치 지역 (시/군/구) <span class="req">*</span></label>
+              <input type="text" id="q-region" name="region" placeholder="예: 서울시 강남구" required />
+              <span class="field-error" id="err-region"></span>
+            </div>
+            <div class="form-group-label">설치 공간 사이즈 <span class="req">*</span></div>
+            <div class="form-row three-col">
+              <div class="form-group">
+                <label for="q-width">가로 (mm)</label>
+                <input type="number" id="q-width" name="width" placeholder="예: 2400" min="100" max="10000" required />
+                <span class="field-error" id="err-width"></span>
+              </div>
+              <div class="form-group">
+                <label for="q-depth">세로 (mm)</label>
+                <input type="number" id="q-depth" name="depth" placeholder="예: 600" min="100" max="2000" required />
+                <span class="field-error" id="err-depth"></span>
+              </div>
+              <div class="form-group">
+                <label for="q-height">높이 (mm)</label>
+                <input type="number" id="q-height" name="height" placeholder="예: 2400" min="100" max="3000" required />
+                <span class="field-error" id="err-height"></span>
+              </div>
+            </div>
+            <div class="form-group">
+              <div class="form-group-label">원하는 형태 <span class="req">*</span></div>
+              <div class="radio-group" id="layout-type-group">
+                <label class="radio-label"><input type="checkbox" name="layout_type" value="1자" /><span>1자</span></label>
+                <label class="radio-label"><input type="checkbox" name="layout_type" value="ㄱ자" /><span>ㄱ자</span></label>
+                <label class="radio-label"><input type="checkbox" name="layout_type" value="ㄷ자" /><span>ㄷ자</span></label>
+                <label class="radio-label"><input type="checkbox" name="layout_type" value="11자" /><span>11자</span></label>
+                <label class="radio-label"><input type="checkbox" name="layout_type" value="잘 모르겠어요" /><span>잘 모르겠어요</span></label>
+              </div>
+              <span class="field-error" id="err-layout"></span>
+            </div>
+            <div class="form-divider"></div>
+            <div class="form-group-title optional"><i class="fas fa-plus-circle"></i> 선택 입력 항목</div>
+            <div class="form-group">
+              <div class="form-group-label">옵션 선택 <span class="opt-label">(중복 선택 가능)</span></div>
+              <div class="checkbox-group">
+                <label class="checkbox-label"><input type="checkbox" name="options" value="아일랜드장" /><span class="checkbox-custom"></span><span>아일랜드장</span></label>
+                <label class="checkbox-label"><input type="checkbox" name="options" value="거울장" /><span class="checkbox-custom"></span><span>거울장</span></label>
+                <label class="checkbox-label"><input type="checkbox" name="options" value="2단서랍장" /><span class="checkbox-custom"></span><span>2단 서랍장</span></label>
+                <label class="checkbox-label"><input type="checkbox" name="options" value="3단서랍장" /><span class="checkbox-custom"></span><span>3단 서랍장</span></label>
+                <label class="checkbox-label"><input type="checkbox" name="options" value="악세사리장" /><span class="checkbox-custom"></span><span>악세사리장</span></label>
+                <label class="checkbox-label"><input type="checkbox" name="options" value="추가기둥" /><span class="checkbox-custom"></span><span>추가 기둥</span></label>
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label for="q-frame-color">프레임 색상</label>
+                <select id="q-frame-color" name="frame_color">
+                  <option value="">선택 안 함</option>
+                  <option value="화이트">화이트</option>
+                  <option value="블랙">블랙</option>
+                  <option value="실버">실버</option>
+                  <option value="골드">골드</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="q-shelf-color">선반 색상</label>
+                <select id="q-shelf-color" name="shelf_color" onchange="handleShelfColorChange(this)">
+                  <option value="">선택 안 함</option>
+                  <option value="솔리드화이트">솔리드화이트</option>
+                  <option value="화이트오크">화이트오크</option>
+                  <option value="스톤그레이">스톤그레이</option>
+                  <option value="진그레이">진그레이</option>
+                  <option value="다크월넛">다크월넛</option>
+                  <option value="기타">기타 (직접 입력)</option>
+                </select>
+              </div>
+            </div>
+            <div class="form-group" id="shelf-color-custom-wrap" style="display:none;">
+              <label for="q-shelf-color-custom">선반 색상 직접 입력</label>
+              <input type="text" id="q-shelf-color-custom" name="shelf_color_custom" placeholder="원하시는 색상을 입력해 주세요" />
+            </div>
+            <div class="form-group">
+              <label for="q-file">방 구조 사진 및 치수 첨부 <span class="opt-label">(선택)</span></label>
+              <div class="file-upload-area" id="file-upload-area" style="position:relative; cursor:pointer;">
+                <i class="fas fa-camera"></i>
+                <span id="file-label">클릭하여 사진을 첨부하세요</span>
+                <small>JPG, PNG — 최대 5MB</small>
+                <input type="file" id="q-file" name="file" accept=".jpg,.jpeg,.png"
+                  style="position:absolute;top:0;left:0;width:100%;height:100%;opacity:0;cursor:pointer;font-size:0;"
+                  onchange="onFileSelected(this)" />
+              </div>
+              <div id="file-preview-wrap" style="display:none; margin-top:10px;">
+                <img id="file-preview-img" src="" alt="첨부 미리보기" style="max-width:100%; max-height:200px; border-radius:8px; border:1px solid var(--border);" />
+              </div>
+            </div>
+            <div class="form-group">
+              <label for="q-memo">요청사항 <span class="opt-label">(선택)</span></label>
+              <textarea id="q-memo" name="request_memo" rows="4" placeholder="특이 사항, 희망 일정, 기타 요청 사항을 자유롭게 작성해 주세요."></textarea>
+            </div>
+            <div class="form-divider"></div>
+            <div class="privacy-agree">
+              <label class="checkbox-label privacy-check">
+                <input type="checkbox" id="q-privacy" name="privacy_agreed" required />
+                <span class="checkbox-custom"></span>
+                <span>상담을 위한 개인정보 수집·이용에 동의합니다. <span class="req">*</span></span>
+              </label>
+              <button type="button" class="privacy-detail-btn" onclick="togglePrivacy()">내용 보기 <i class="fas fa-chevron-down" id="privacy-icon"></i></button>
+              <div class="privacy-detail" id="privacy-detail" style="display:none;">
+                <p><strong>수집 항목:</strong> 이름, 연락처, 설치 지역, 설치 공간 정보</p>
+                <p><strong>수집 목적:</strong> 드레스룸 견적 상담 및 시공 안내</p>
+                <p><strong>보유 기간:</strong> 상담 완료 후 3개월</p>
+                <p>귀하는 개인정보 수집·이용을 거부하실 수 있으며, 거부 시 견적 상담이 제한될 수 있습니다.</p>
+              </div>
+              <span class="field-error" id="err-privacy"></span>
+            </div>
+            <button type="submit" class="btn btn-primary btn-full" id="submit-btn">
+              <i class="fas fa-paper-plane"></i> 견적요청 보내기
+            </button>
+          </form>
+        </div><!-- /견적 폼 -->
+
+      </div><!-- /max-width wrapper -->
+    </div><!-- /page-quote -->
+
+
+    <!-- ========== [AI 상담] ========== -->
+    <div id="page-chat" class="page">
+      <div style="height:calc(100vh - 64px); background:#f5e9cc; display:flex; justify-content:center; align-items:stretch; padding:20px 24px; box-sizing:border-box;">
+        <iframe
+          id="chatFrame"
+          src="../chat.html"
+          style="width:100%; max-width:480px; border:none; border-radius:14px; box-shadow:0 4px 24px rgba(0,0,0,.12); display:block;"
+          allow="clipboard-read; clipboard-write"
+          title="AI 상담"
+        ></iframe>
+      </div>
+    </div><!-- /page-chat -->
+
+  </main>
+
+  <!-- 플로팅 버튼 그룹 -->
+  <div class="floating-group">
+    <a href="https://www.instagram.com/kateblanc_official/" target="_blank" rel="noopener" class="floating-btn floating-insta" title="인스타그램">
+      <i class="fab fa-instagram"></i>
+    </a>
+    <a href="http://pf.kakao.com/_qbxjwxb/" target="_blank" rel="noopener" class="floating-btn floating-kakao" title="카카오톡 채널">
+      <i class="fas fa-comment-dots"></i>
+      <span>카카오톡</span>
+    </a>
+    <a href="#" class="floating-btn floating-quote" id="floating-btn" onclick="showPage('quote'); return false;" title="견적요청">
+      <i class="fas fa-pencil-ruler"></i>
+      <span>견적요청</span>
+    </a>
+  </div>
+
+  <!-- 푸터 -->
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <div class="footer-top">
+        <div class="footer-brand">
+          <div class="footer-logo"><em style="font-family:var(--font-brand);font-style:italic;font-weight:400;letter-spacing:.02em;">Kate Blanc</em> <span style="font-size:11px;opacity:.5;font-weight:300;">Dressroom</span></div>
+          <p class="footer-tagline">내 공간에 딱 맞는 드레스룸, 케이트블랑이 만들어 드립니다.</p>
+        </div>
+        <div class="footer-contact">
+          <h4 class="footer-col-title">연락처</h4>
+          <a href="tel:01037845215" class="footer-contact-item"><i class="fas fa-phone"></i><span>010-3784-5215</span></a>
+          <a href="http://pf.kakao.com/_qbxjwxb/" target="_blank" rel="noopener" class="footer-contact-item footer-kakao"><i class="fas fa-comment-dots"></i><span>카카오톡 채널 상담</span></a>
+          <a href="https://blog.naver.com/kateblanc_" target="_blank" rel="noopener" class="footer-contact-item"><i class="fas fa-blog"></i><span>네이버 블로그</span></a>
+        </div>
+        <div class="footer-nav-col">
+          <h4 class="footer-col-title">메뉴</h4>
+          <div class="footer-links">
+            <a href="#" onclick="showPage('home'); return false;">홈</a>
+            <a href="#" onclick="showPage('blog'); return false;">블로그</a>
+            <a href="#" onclick="showPage('quote'); return false;">견적요청</a>
+            <a href="#" onclick="showPage('chat'); return false;">AI 상담</a>
+          </div>
+          <div class="footer-social">
+            <a href="http://pf.kakao.com/_qbxjwxb/" target="_blank" rel="noopener" class="footer-social-icon footer-social-kakao"><i class="fas fa-comment-dots"></i></a>
+            <a href="https://www.instagram.com/kateblanc_official/" target="_blank" rel="noopener" class="footer-social-icon footer-social-insta"><i class="fab fa-instagram"></i></a>
+            <a href="https://blog.naver.com/kateblanc_" target="_blank" rel="noopener" class="footer-social-icon footer-social-blog"><i class="fas fa-blog"></i></a>
+          </div>
+        </div>
+      </div>
+      <div class="footer-bottom">
+        <p class="footer-copy">© 2025 케이트블랑 드레스룸. All rights reserved.</p>
+        <p class="footer-copy-sub">사업자등록번호 문의: 010-3784-5215</p>
+      </div>
+    </div>
+  </footer>
+
+  <style>
+  .dc-bot-row { display:flex; gap:8px; align-items:flex-end; }
+  .dc-user-row { display:flex; gap:8px; align-items:flex-end; flex-direction:row-reverse; }
+  .dc-av { width:30px;height:30px;border-radius:50%;background:linear-gradient(135deg,#2c2820,#6b5a48);color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0; }
+  .dc-bubble { max-width:75%;padding:9px 13px;font-size:13px;line-height:1.65;border-radius:16px; }
+  .dc-bot  { background:#fff;border:1px solid #e4ddd2;border-bottom-left-radius:4px;color:#2c2820; }
+  .dc-user { background:linear-gradient(135deg,#c9a96e,#a8883f);color:#fff;border-bottom-right-radius:4px; }
+  .dc-qbtn { font-size:11.5px;padding:5px 13px;border-radius:20px;border:1.5px solid #c9a96e;color:#a8883f;background:#fff;cursor:pointer;font-family:inherit;transition:all .15s; }
+  .dc-qbtn:hover { background:#c9a96e;color:#fff; }
+  </style>
+  <script src="js/main.js"></script>
+  <script>
+  /* ── 데모 채팅 ── */
+  const DC_FLOW = [
+    { bot:'안녕하세요! 😊\n케이트블랑 드레스룸 AI 상담원 루마네입니다.\n\n먼저 성함을 알려주시겠어요?',        field:'qf-name',       quick:[] },
+    { bot:'감사합니다! 😊\n연락 가능한 전화번호를 알려주시겠어요?',                                          field:'qf-phone',      quick:[] },
+    { bot:'설치 지역을 알려주세요.\n예) 서울 강남구, 경기 성남시',                                           field:'qf-region',     quick:[] },
+    { bot:'공간 사이즈를 mm 단위로 알려주세요.\n가로 / 세로 / 높이 순서로요.\n예) 3600 / 600 / 2400',        field:'__size__',      quick:[] },
+    { bot:'원하시는 드레스룸 형태는 어떻게 되세요?',                                                         field:'__layout__',    quick:['1자형','ㄱ자형','ㄷ자형','11자형'] },
+    { bot:'추가 옵션이 필요하신가요?\n아일랜드장, 거울장, 서랍장 등이 있어요.\n없으시면 "없어요"라고 입력해 주세요.', field:'__options__', quick:[] },
+    { bot:'프레임 색상은 어떻게 하시겠어요?\n화이트, 블랙, 실버, 골드',                                      field:'qf-frame-color',quick:[] },
+    { bot:'선반 색상은 어떻게 하시겠어요?\n솔리드화이트, 화이트오크, 스톤그레이, 진그레이, 다크월넛',          field:'qf-shelf-color',quick:[] },
+    { bot:'요청사항이 있으시면 말씀해 주세요.\n없으시면 "없어요"라고 입력해 주세요.',                          field:'qf-memo',       quick:[] },
+    { bot:'감사합니다! 😊\n왼쪽 견적서를 확인하시고 이상이 없으면 "견적 접수하기"를 눌러주세요.',               field:null,            quick:['견적서 확인했어요 ✓'] },
+  ];
+  let dcStep = 0;
+
+  /* ── 홈 채팅 ── */
+  const HC_KEY     = 'kb_home_chat';
+  const HC_HIST_KEY = 'kb_home_chat_history';
+  const HC_DATA = { name:'', phone:'', region:'', width:'', depth:'', height:'', layout:'', options:'', frameColor:'', shelfColor:'', memo:'' };
+  let hcStep = 0;
+
+  function hcSaveState() {
+    const msgs = [];
+    document.querySelectorAll('#homeChatMsgs > div').forEach(el => msgs.push(el.outerHTML));
+    localStorage.setItem(HC_KEY, JSON.stringify({ step: hcStep, msgs, data: { ...HC_DATA } }));
+  }
+
+  function hcLoadState() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(HC_KEY));
+      if (!saved || !saved.msgs || saved.msgs.length === 0) return false;
+      hcStep = saved.step || 0;
+      Object.assign(HC_DATA, saved.data || {});
+      const area = document.getElementById('homeChatMsgs');
+      area.innerHTML = saved.msgs.join('');
+      area.scrollTop = area.scrollHeight;
+      if (hcStep < DC_FLOW.length) hcSetQuick(DC_FLOW[hcStep].quick || []);
+      return true;
+    } catch { return false; }
+  }
+
+  function hcArchiveCurrent() {
+    // 현재 대화를 히스토리 목록에 저장
+    const current = JSON.parse(localStorage.getItem(HC_KEY) || 'null');
+    if (!current || !current.msgs || current.msgs.length === 0) return;
+    const history = JSON.parse(localStorage.getItem(HC_HIST_KEY) || '[]');
+    const now = new Date();
+    const label = `${now.getFullYear()}.${String(now.getMonth()+1).padStart(2,'0')}.${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+    history.unshift({ savedAt: label, ...current });
+    if (history.length > 10) history.length = 10; // 최대 10개 보관
+    localStorage.setItem(HC_HIST_KEY, JSON.stringify(history));
+  }
+
+  function hcClear() {
+    hcArchiveCurrent(); // 현재 대화 히스토리에 보관
+    localStorage.removeItem(HC_KEY);
+    hcStep = 0;
+    Object.keys(HC_DATA).forEach(k => HC_DATA[k] = '');
+    document.getElementById('homeChatMsgs').innerHTML = `
+      <div class="dc-bot-row">
+        <div class="dc-av">AI</div>
+        <div class="dc-bubble dc-bot">안녕하세요! 😊<br>케이트블랑 드레스룸 AI 상담원 루마네입니다.<br><br>먼저 성함을 알려주시겠어요?</div>
+      </div>`;
+    document.getElementById('homeChatQuick').innerHTML = '';
+  }
+
+  function hcAddMsg(role, text) {
+    const area = document.getElementById('homeChatMsgs');
+    const row = document.createElement('div');
+    row.className = role === 'user' ? 'dc-user-row' : 'dc-bot-row';
+    if (role === 'bot') row.innerHTML = `<div class="dc-av">AI</div><div class="dc-bubble dc-bot">${text.replace(/\n/g,'<br>')}</div>`;
+    else row.innerHTML = `<div class="dc-bubble dc-user">${text.replace(/\n/g,'<br>')}</div>`;
+    area.appendChild(row);
+    area.scrollTop = area.scrollHeight;
+  }
+
+  function hcSetQuick(btns) {
+    const area = document.getElementById('homeChatQuick');
+    area.innerHTML = '';
+    btns.forEach(label => {
+      const b = document.createElement('button');
+      b.className = 'dc-qbtn'; b.textContent = label;
+      b.onclick = () => { document.getElementById('homeChatInp').value = label; hcSend(); };
+      area.appendChild(b);
+    });
+  }
+
+  function hcCollect(field, text) {
+    if (!field) return;
+    if (field === '__size__') {
+      const nums = text.replace(/[×xX\/,]/g,' ').match(/\d{3,4}/g) || [];
+      HC_DATA.width = nums[0]||''; HC_DATA.depth = nums[1]||''; HC_DATA.height = nums[2]||'';
+    } else if (field === '__layout__') {
+      HC_DATA.layout = text.replace(/형$/,'').trim();
+    } else if (field === '__options__') {
+      HC_DATA.options = text;
+    } else {
+      const map = { 'qf-name':'name','qf-phone':'phone','qf-region':'region',
+                    'qf-frame-color':'frameColor','qf-shelf-color':'shelfColor','qf-memo':'memo' };
+      if (map[field]) HC_DATA[map[field]] = text;
+    }
+  }
+
+  function hcSend() {
+    const inp = document.getElementById('homeChatInp');
+    const text = inp.value.trim();
+    if (!text) return;
+    hcAddMsg('user', text);
+    inp.value = ''; inp.style.height = 'auto';
+    document.getElementById('homeChatSend').disabled = true;
+    document.getElementById('homeChatQuick').innerHTML = '';
+
+    const prev = DC_FLOW[hcStep];
+    if (prev) hcCollect(prev.field, text);
+
+    hcStep++;
+    hcSaveState();
+
+    if (hcStep < DC_FLOW.length) {
+      setTimeout(() => {
+        hcAddMsg('bot', DC_FLOW[hcStep].bot);
+        hcSetQuick(DC_FLOW[hcStep].quick || []);
+        hcSaveState();
+      }, 600);
+    } else {
+      setTimeout(() => {
+        hcAddMsg('bot', '상담 내용을 정리했어요 😊 아래에서 확인하세요!');
+        hcSaveState();
+        setTimeout(() => hcShowQuote(), 800);
+      }, 600);
+    }
+  }
+
+  function hcFileSelected(input) {
+    const file = input.files[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) { alert('이미지 파일만 첨부 가능합니다.'); return; }
+    const reader = new FileReader();
+    reader.onload = e => {
+      const area = document.getElementById('homeChatMsgs');
+      const row = document.createElement('div');
+      row.className = 'dc-user-row';
+      row.innerHTML = `<div class="dc-bubble dc-user" style="padding:6px;"><img src="${e.target.result}" style="max-width:200px;border-radius:8px;display:block;"></div>`;
+      area.appendChild(row);
+      area.scrollTop = area.scrollHeight;
+      hcSaveState();
+    };
+    reader.readAsDataURL(file);
+    input.value = '';
+  }
+
+  function hcShowQuote() {
+    const d = HC_DATA;
+    const size = (d.width && d.depth && d.height) ? `${d.width} × ${d.depth} × ${d.height} mm` : '-';
+    const rows = [
+      ['이름', d.name], ['연락처', d.phone], ['설치 지역', d.region],
+      ['공간 사이즈', size], ['형태', d.layout], ['옵션', d.options],
+      ['프레임 색상', d.frameColor], ['선반 색상', d.shelfColor], ['요청사항', d.memo],
+    ];
+    document.getElementById('hcQuoteBody').innerHTML = rows.map(([label, val]) => `
+      <tr>
+        <td style="padding:8px 10px;font-weight:600;color:#6b6056;width:110px;border-bottom:1px solid #f0ece4;">${label}</td>
+        <td style="padding:8px 10px;color:#2c2820;border-bottom:1px solid #f0ece4;">${val || '-'}</td>
+      </tr>`).join('');
+    const modal = document.getElementById('hcQuoteModal');
+    modal.style.display = 'flex';
+  }
+
+  function hcPrintQuote() {
+    const d = HC_DATA;
+    const size = (d.width && d.depth && d.height) ? `${d.width} × ${d.depth} × ${d.height} mm` : '-';
+    const w = window.open('','_blank');
+    w.document.write(`<html><head><title>견적 요약</title><style>body{font-family:sans-serif;padding:30px;font-size:14px;}table{width:100%;border-collapse:collapse;}td{padding:10px;border:1px solid #ddd;}th{background:#f5f5f5;}</style></head><body>
+      <h2>케이트블랑 드레스룸 상담 요약</h2>
+      <table><tr><th>항목</th><th>내용</th></tr>
+      <tr><td>이름</td><td>${d.name||'-'}</td></tr>
+      <tr><td>연락처</td><td>${d.phone||'-'}</td></tr>
+      <tr><td>설치 지역</td><td>${d.region||'-'}</td></tr>
+      <tr><td>공간 사이즈</td><td>${size}</td></tr>
+      <tr><td>형태</td><td>${d.layout||'-'}</td></tr>
+      <tr><td>옵션</td><td>${d.options||'-'}</td></tr>
+      <tr><td>프레임 색상</td><td>${d.frameColor||'-'}</td></tr>
+      <tr><td>선반 색상</td><td>${d.shelfColor||'-'}</td></tr>
+      <tr><td>요청사항</td><td>${d.memo||'-'}</td></tr>
+      </table></body></html>`);
+    w.document.close();
+    w.print();
+  }
+
+  function hcShowHistory() {
+    const history = JSON.parse(localStorage.getItem(HC_HIST_KEY) || '[]');
+    const body = document.getElementById('hcHistoryBody');
+    if (!history.length) {
+      body.innerHTML = '<div style="text-align:center;color:#9ca3af;padding:24px 0;">저장된 이전 상담이 없습니다.</div>';
+    } else {
+      body.innerHTML = history.map((item, i) => {
+        const d = item.data || {};
+        const label = item.savedAt || '알 수 없음';
+        const nameStr = d.name ? ` · ${d.name}` : '';
+        const msgCount = item.msgs ? item.msgs.length : 0;
+        const preview = (item.msgs || []).find(m => m.role === 'user');
+        const previewText = preview
+          ? (preview.text.length > 45 ? preview.text.slice(0, 45) + '…' : preview.text)
+          : '';
+        return `<div style="border:1px solid #e4ddd2;border-radius:10px;padding:12px 14px;margin-bottom:10px;">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;">
+            <div>
+              <div style="font-size:12px;color:#9ca3af;">${label}${nameStr}</div>
+              ${previewText ? `<div style="font-size:13px;color:#4b4540;margin-top:3px;">"${previewText}"</div>` : ''}
+            </div>
+            <span style="font-size:11px;color:#c9a96e;background:#fdf8f2;padding:2px 8px;border-radius:12px;white-space:nowrap;margin-left:8px;">${msgCount}개 메시지</span>
+          </div>
+          <button onclick="hcContinueHistory(${i})" style="width:100%;padding:8px;background:linear-gradient(135deg,#c9a96e,#a8883f);color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;">이어서 상담하기</button>
+        </div>`;
+      }).join('');
+    }
+    document.getElementById('hcHistoryModal').style.display = 'flex';
+  }
+
+  function hcContinueHistory(idx) {
+    const history = JSON.parse(localStorage.getItem(HC_HIST_KEY) || '[]');
+    const item = history[idx];
+    if (!item) return;
+    localStorage.setItem(HC_KEY, JSON.stringify({ msgs: item.msgs, step: item.step, data: item.data }));
+    hcLoadState();
+    document.getElementById('hcHistoryModal').style.display = 'none';
+  }
+
+  // 페이지 로드 시 이전 대화 복원 (스크립트는 body 끝에 위치하므로 바로 실행)
+  hcLoadState();
+
+  function dcResizeInp(el) {
+    el.style.height = 'auto';
+    el.style.height = Math.min(el.scrollHeight, 90) + 'px';
+  }
+
+  function dcAddMsg(role, text) {
+    const area = document.getElementById('demoChatMsgs');
+    const row = document.createElement('div');
+    row.className = role === 'user' ? 'dc-user-row' : 'dc-bot-row';
+    if (role === 'bot') row.innerHTML = `<div class="dc-av">AI</div><div class="dc-bubble dc-bot">${text.replace(/\n/g,'<br>')}</div>`;
+    else row.innerHTML = `<div class="dc-bubble dc-user">${text.replace(/\n/g,'<br>')}</div>`;
+    area.appendChild(row);
+    area.scrollTop = area.scrollHeight;
+  }
+
+  function dcSetQuick(btns) {
+    const area = document.getElementById('demoQuickArea');
+    area.innerHTML = '';
+    btns.forEach(label => {
+      const b = document.createElement('button');
+      b.className = 'dc-qbtn'; b.textContent = label;
+      b.onclick = () => { document.getElementById('demoChatInp').value = label; dcSend(); };
+      area.appendChild(b);
+    });
+  }
+
+  function dcFillField(id, val) {
+    if (!id || !val) return;
+    const el = document.getElementById(id);
+    if (!el) return;
+    if (el.tagName === 'SELECT') {
+      const opt = [...el.options].find(o => o.value && val.includes(o.value));
+      if (opt) el.value = opt.value;
+    } else {
+      el.value = val;
+    }
+    el.style.background = '#fef9c3';
+    setTimeout(() => el.style.background = '', 1200);
+    // 견적요청 탭 폼도 같이 채움
+    const qMap = {'qf-name':'q-name','qf-phone':'q-phone','qf-region':'q-region',
+                  'qf-width':'q-width','qf-depth':'q-depth','qf-height':'q-height',
+                  'qf-memo':'q-memo','qf-frame-color':'q-frame-color','qf-shelf-color':'q-shelf-color'};
+    const qId = qMap[id];
+    if (qId) { const qEl = document.getElementById(qId); if(qEl){ qEl.value = el.tagName==='SELECT'?el.value:val; } }
+  }
+
+  function dcSend() {
+    const inp = document.getElementById('demoChatInp');
+    const text = inp.value.trim();
+    if (!text) return;
+    dcAddMsg('user', text);
+    inp.value = ''; inp.style.height = 'auto';
+    document.getElementById('demoChatSend').disabled = true;
+    document.getElementById('demoQuickArea').innerHTML = '';
+
+    const prev = DC_FLOW[dcStep];
+    if (prev) {
+      if (prev.field === '__size__') {
+        const nums = text.replace(/[×xX×\/,]/g,' ').match(/\d{3,4}/g) || [];
+        dcFillField('qf-width', nums[0]||''); dcFillField('qf-depth', nums[1]||''); dcFillField('qf-height', nums[2]||'');
+      } else if (prev.field === '__layout__') {
+        const lbl = text.replace(/형$/,'').trim();
+        document.querySelectorAll('#qf-layout-group .qf-layout-btn').forEach(b => {
+          b.classList.toggle('active', b.textContent.trim() === lbl);
+        });
+        const qcb = document.querySelector(`#layout-type-group input[value="${lbl}"]`);
+        if (qcb) qcb.checked = true;
+      } else if (prev.field === '__options__') {
+        const optMap = {
+          '아일랜드':'qf-opt-island','거울장':'qf-opt-mirror',
+          '2단':'qf-opt-2drawer','3단':'qf-opt-3drawer',
+          '악세사리':'qf-opt-accessory','추가기둥':'qf-opt-pillar','기둥':'qf-opt-pillar'
+        };
+        const lo = text.toLowerCase();
+        for (const [kw, id] of Object.entries(optMap)) {
+          if (lo.includes(kw)) {
+            const cb = document.getElementById(id);
+            if (cb) cb.checked = true;
+          }
+        }
+      } else if (prev.field) {
+        dcFillField(prev.field, text);
+      }
+    }
+
+    dcStep++;
+    if (dcStep < DC_FLOW.length) {
+      setTimeout(() => {
+        dcAddMsg('bot', DC_FLOW[dcStep].bot);
+        dcSetQuick(DC_FLOW[dcStep].quick || []);
+      }, 600);
+    }
+  }
+  // ── 채팅 iframe → 왼쪽 폼 자동완성 ──
+  window.addEventListener('message', function(e) {
+    if (!e.data || e.data.type !== 'lumane_fields') return;
+    const f = e.data.fields;
+
+    function flashFill(id, val) {
+      if (val === undefined || val === null || val === '') return;
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.value = val;
+      el.classList.add('qf-flash');
+      el.style.background = '#fef9c3';
+      setTimeout(() => { el.style.background = ''; }, 1200);
+    }
+
+    // AI상담 탭 패널(qf-*) + 견적요청 탭 폼(q-*) 둘 다 채우기
+    flashFill('qf-name',  f.name);   flashFill('q-name',  f.name);
+    flashFill('qf-phone', f.phone);  flashFill('q-phone', f.phone);
+    flashFill('qf-region',f.region); flashFill('q-region',f.region);
+    flashFill('qf-width', f.width);  flashFill('q-width', f.width);
+    flashFill('qf-depth', f.depth);  flashFill('q-depth', f.depth);
+    flashFill('qf-height',f.height); flashFill('q-height',f.height);
+    flashFill('qf-memo',  f.memo);   flashFill('q-memo',  f.memo);
+
+    // 형태 버튼
+    if (f.layout) {
+      const target = f.layout.replace(/형$/, '');
+      document.querySelectorAll('#qf-layout-group .qf-layout-btn').forEach(btn => {
+        const match = btn.textContent.trim() === target;
+        btn.classList.toggle('active', match);
+      });
+    }
+
+    // 옵션 체크박스 (qf-* 패널 + q-* 폼 둘 다)
+    if (f.options) {
+      const optMap = {
+        '아일랜드': { qf:'qf-opt-island', qVal:'아일랜드장' },
+        '거울장':   { qf:'qf-opt-mirror',  qVal:'거울장' },
+        '2단':      { qf:'qf-opt-2drawer', qVal:'2단서랍장' },
+        '3단':      { qf:'qf-opt-3drawer', qVal:'3단서랍장' },
+        '악세사리': { qf:'qf-opt-accessory',qVal:'악세사리장' },
+        '추가기둥': { qf:'qf-opt-pillar',  qVal:'추가기둥' },
+        '기둥추가': { qf:'qf-opt-pillar',  qVal:'추가기둥' },
+      };
+      const optStr = f.options.toLowerCase();
+      for (const [kw, ids] of Object.entries(optMap)) {
+        if (optStr.includes(kw.toLowerCase())) {
+          const cb = document.getElementById(ids.qf);
+          if (cb) { cb.checked = true; const lbl = cb.closest('.qf-check-label'); if(lbl) lbl.style.background='#fef3dd'; }
+          const qcb = document.querySelector(`#page-quote input[name="options"][value="${ids.qVal}"]`);
+          if (qcb) qcb.checked = true;
+        }
+      }
+    }
+
+    // 형태 (q-* 폼)
+    if (f.layout) {
+      const target = f.layout.replace(/형$/, '');
+      const qLayout = document.querySelector(`#layout-type-group input[value="${target}"]`);
+      if (qLayout) qLayout.checked = true;
+    }
+
+    // 프레임/선반 색상 select (qf-* + q-*)
+    function fillSelect(id, val) {
+      if (!val) return;
+      const sel = document.getElementById(id);
+      if (!sel) return;
+      const opt = [...sel.options].find(o => o.value && val.includes(o.value));
+      const chosen = opt ? opt.value : '기타';
+      sel.value = chosen;
+      sel.style.background = '#fef9c3'; setTimeout(()=>sel.style.background='', 1200);
+      return chosen;
+    }
+    if (f.frameColor) {
+      fillSelect('qf-frame-color', f.frameColor);
+      fillSelect('q-frame-color',  f.frameColor);
+    }
+    if (f.shelfColor) {
+      const chosen = fillSelect('qf-shelf-color', f.shelfColor);
+      fillSelect('q-shelf-color', f.shelfColor);
+      if (chosen === '기타') {
+        document.getElementById('qf-shelf-custom-wrap').style.display = '';
+        const wrap2 = document.getElementById('shelf-color-custom-wrap');
+        if (wrap2) wrap2.style.display = '';
+        flashFill('qf-shelf-custom', f.shelfColor);
+        flashFill('q-shelf-color-custom', f.shelfColor);
+      }
+    }
+  });
+
+  function qfSelectLayout(btn, val) {
+    document.querySelectorAll('#qf-layout-group .qf-layout-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+  }
+
+  function handleShelfColorQF(sel) {
+    document.getElementById('qf-shelf-custom-wrap').style.display = sel.value === '기타' ? '' : 'none';
+  }
+
+  function onQfFileSelected(input) {
+    if (!input.files || !input.files[0]) return;
+    const file = input.files[0];
+    document.getElementById('qf-file-label').textContent = file.name;
+    const reader = new FileReader();
+    reader.onload = e => {
+      const wrap = document.getElementById('qf-file-preview-wrap');
+      document.getElementById('qf-file-preview-img').src = e.target.result;
+      wrap.style.display = '';
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function toggleQfPrivacy() {
+    const detail = document.getElementById('qf-privacy-detail');
+    const icon   = document.getElementById('qf-privacy-icon');
+    const open   = detail.style.display === 'none' || detail.style.display === '';
+    detail.style.display = open ? 'block' : 'none';
+    icon.style.transform  = open ? 'rotate(180deg)' : '';
+  }
+
+  function submitFromChat() {
+    // 텍스트 필드 복사
+    const textMap = {
+      'qf-name':'q-name', 'qf-phone':'q-phone', 'qf-region':'q-region',
+      'qf-width':'q-width', 'qf-depth':'q-depth', 'qf-height':'q-height', 'qf-memo':'q-memo'
+    };
+    for (const [src, dst] of Object.entries(textMap)) {
+      const s = document.getElementById(src), d = document.getElementById(dst);
+      if (s && d && s.value) d.value = s.value;
+    }
+    // 프레임/선반 색상 select 복사
+    const selMap = { 'qf-frame-color':'q-frame-color', 'qf-shelf-color':'q-shelf-color' };
+    for (const [src, dst] of Object.entries(selMap)) {
+      const s = document.getElementById(src), d = document.getElementById(dst);
+      if (s && d && s.value) d.value = s.value;
+    }
+    // 선반 색상 직접입력
+    const shelfCustom = document.getElementById('qf-shelf-custom');
+    const shelfCustomDst = document.getElementById('q-shelf-color-custom');
+    if (shelfCustom && shelfCustomDst && shelfCustom.value) {
+      shelfCustomDst.value = shelfCustom.value;
+      document.getElementById('shelf-color-custom-wrap').style.display = '';
+    }
+    // 옵션 체크박스 복사
+    const optMap2 = {
+      'qf-opt-island':'아일랜드장', 'qf-opt-mirror':'거울장',
+      'qf-opt-2drawer':'2단서랍장', 'qf-opt-3drawer':'3단서랍장',
+      'qf-opt-accessory':'악세사리장', 'qf-opt-pillar':'추가기둥'
+    };
+    for (const [srcId, val] of Object.entries(optMap2)) {
+      const srcCb = document.getElementById(srcId);
+      if (srcCb && srcCb.checked) {
+        const dstCb = document.querySelector(`#page-quote input[name="options"][value="${val}"]`);
+        if (dstCb) dstCb.checked = true;
+      }
+    }
+    // 형태 복사
+    const activeLayout = document.querySelector('#qf-layout-group .qf-layout-btn.active');
+    if (activeLayout) {
+      const layoutVal = activeLayout.textContent.trim();
+      const dstLayout = document.querySelector(`#layout-type-group input[value="${layoutVal}"]`);
+      if (dstLayout) dstLayout.checked = true;
+    }
+    // 개인정보 동의
+    const qfPrivacy = document.getElementById('qf-privacy');
+    const dstPrivacy = document.getElementById('q-privacy');
+    if (qfPrivacy && dstPrivacy && qfPrivacy.checked) dstPrivacy.checked = true;
+
+    if (typeof showPage === 'function') showPage('quote');
+  }
+  </script>
+</body>
+</html>
