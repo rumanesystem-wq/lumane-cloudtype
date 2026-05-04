@@ -677,9 +677,7 @@ document.addEventListener('DOMContentLoaded', () => {
   window.newChat            = newChat;
   window.closeQuote         = closeQuote;
   window.printQuote         = printQuote;
-  window.showTranscript     = showTranscript;
-  window.continueFromHistory = continueFromHistory;
-  window.closeTranscript    = closeTranscript;
+
   window.toggleSearch       = toggleSearch;
   window.closeSearch        = closeSearch;
 
@@ -805,10 +803,6 @@ async function startChat() {
       }
     }
 
-    if (serverOnline) {
-      const savedPhone = localStorage.getItem('루마네_연락처');
-      if (savedPhone) fetchConsultationHistory(savedPhone);
-    }
   }).catch(() => {
     /* 예상치 못한 오류 시 데모 인사로 fallback */
     greet();
@@ -824,22 +818,6 @@ async function startChat() {
 
   /* 배포 자동감지 — 새 버전 배포 시 자동 새로고침 */
   startUpdateChecker();
-}
-
-/* ================================================================
-   이전 상담 이력 조회 (Supabase, 연락처 기반)
-================================================================ */
-async function fetchConsultationHistory(phone) {
-  if (!phone || !serverOnline) return;
-  try {
-    const clean = phone.replace(/[-\s]/g, '');
-    const r = await fetch(`${SERVER}/api/consultation-history?phone=${encodeURIComponent(clean)}`);
-    if (!r.ok) return;
-    const data = await r.json();
-    if (Array.isArray(data.consultations)) {
-      setHistoryData(data.consultations);
-    }
-  } catch { /* 무시 */ }
 }
 
 /* ================================================================

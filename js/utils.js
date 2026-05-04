@@ -2,13 +2,23 @@
    공통 유틸리티 함수
 ================================================================ */
 
-/** HTML 특수문자 이스케이프 (XSS 방지) */
+/** HTML 특수문자 이스케이프 (텍스트 노드용, \n → <br>) */
 export function esc(s) {
   return String(s)
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/\n/g, '<br>');
+}
+
+/** HTML 속성값 이스케이프 (onclick/href 등 속성 안에 넣을 때 사용, \n 변환 없음) */
+export function escAttr(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 function _fmt(d) {

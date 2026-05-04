@@ -594,7 +594,7 @@ function renderDashboardSessions(sessions) {
   // 서버 읽음 데이터 첫 로드 후 테이블이 비어있으면 현재 모든 세션을 읽음 처리 (초기화)
   if (_seenCountsLoaded && Object.keys(_seenMsgCounts).length === 0) {
     sessions.forEach(s => { if (s.id) _saveSeenCount(s.id, s.messageCount ?? 0); });
-    savedConvs.forEach(c => { if (c.id) _saveSeenCount(c.id, c.message_count ?? 0); });
+    (_cachedConversations || []).forEach(c => { if (c.id) _saveSeenCount(c.id, c.message_count ?? 0); });
   }
 
   const seenSessions = _getSeenSessions();
@@ -667,6 +667,8 @@ function renderDashboardSessions(sessions) {
               <div style="display:flex;align-items:center;gap:5px;">
                 <span style="font-size:15px;font-weight:${unread?'700':'600'};color:#111827;">${escAdmin(s.customerName)}</span>
                 ${s.isTest ? '<span style="font-size:10px;padding:1px 5px;border-radius:6px;background:#fef3c7;color:#92400e;font-weight:700;">테스트</span>' : ''}
+                ${!s.isTest && s.isReturning ? '<span style="font-size:10px;padding:1px 5px;border-radius:6px;background:#d1fae5;color:#065f46;font-weight:700;">재방문</span>' : ''}
+                ${!s.isTest && !s.isReturning ? '<span style="font-size:10px;padding:1px 5px;border-radius:6px;background:#e0f2fe;color:#0369a1;font-weight:700;">첫방문</span>' : ''}
               </div>
               <span style="font-size:11px;color:#9ca3af;flex-shrink:0;margin-left:8px;">${ago}</span>
             </div>
@@ -715,6 +717,7 @@ function renderDashboardSessions(sessions) {
                 <span style="font-size:15px;font-weight:${isNew?'700':'600'};color:#111827;">${escAdmin(getConvLabel(c))}</span>
                 ${c.layout ? `<span style="font-size:11px;padding:1px 6px;border-radius:6px;background:#ede9fe;color:#7c3aed;font-weight:600;">${escAdmin(c.layout)}</span>` : ''}
                 ${isNew ? '<span style="font-size:10px;padding:1px 5px;border-radius:6px;background:#ef4444;color:#fff;font-weight:700;">NEW</span>' : ''}
+                ${c.is_test ? '<span style="font-size:10px;padding:1px 5px;border-radius:6px;background:#fef3c7;color:#92400e;font-weight:700;">테스트</span>' : ''}
               </div>
               <div style="font-size:11px;color:#9ca3af;margin-top:1px;">${timeStr} · 💬 ${c.message_count||0}개</div>
             </div>

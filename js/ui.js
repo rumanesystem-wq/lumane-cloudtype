@@ -485,7 +485,7 @@ export function addMsg(role, text, { mid = null, replyTo = null, time = null, sk
     }
 
     /* 견적서 감지 → PNG 이미지로 렌더링 */
-    const looksLikeQuote = /케이트블랑.*견적서/.test(clean) && /고객명|설치지역|총\s*금액|주문내역/.test(clean);
+    const looksLikeQuote = /케이트블랑.*견적서/.test(clean) && /고객명|설치지역|총\s*금액|주문내역|\[고객\s*정보\]|\[설치\s*공간\]|\[금액\]/.test(clean);
     const isQuote = !skipQuoteImage && looksLikeQuote && typeof window.html2canvas === 'function';
     let hasSpecial = false;
 
@@ -546,7 +546,7 @@ export function addMsg(role, text, { mid = null, replyTo = null, time = null, sk
           for (const part of fallbackText.split(/\n\n+/).map(p => p.trim()).filter(Boolean)) {
             const b = document.createElement('div');
             b.className = 'bubble bot';
-            b.innerHTML = esc(part).replace(/\n/g, '<br>');
+            b.innerHTML = esc(part).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
             bubblesCol.appendChild(b);
           }
           scrollOrPreview('루마네', fallbackText);
@@ -560,7 +560,7 @@ export function addMsg(role, text, { mid = null, replyTo = null, time = null, sk
         } else {
           const b = document.createElement('div');
           b.className = 'bubble bot';
-          b.innerHTML = esc(part);
+          b.innerHTML = esc(part).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
           bubblesCol.appendChild(b);
         }
       }
@@ -836,12 +836,16 @@ export function updateQuickFromText(text) {
   if (/(드레스룸\s*형태|형태.*어떻게|어떤\s*형태|형태.*선택|어느\s*형태)/.test(text)) {
     setQuick(['1자형', 'ㄱ자형', 'ㄷ자형', '11자형'], true); return;
   }
-  /* 선반 색상 질문 */
-  if (/(선반\s*색상|선반.*색상)/.test(text)) {
+  /* 견적서 완료 텍스트면 퀵버튼 감지 스킵 */
+  const isQuote = /\[설치\s*공간\]/.test(text) && /\[금액\]/.test(text);
+  if (isQuote) { setQuick([]); return; }
+
+  /* 선반 색상 질문 — 견적서 항목 언급이 아닌 실제 질문만 */
+  if (/(선반\s*색상.*어떻게|선반\s*색상.*알려|선반\s*색상.*선택|선반\s*색상.*원하|어떤\s*선반\s*색상|선반\s*색상은)/.test(text)) {
     setQuick(['화이트오크', '솔리드화이트', '메이플', '스톤그레이', '진그레이', '다크월넛', '민트그린'], true); return;
   }
   /* 프레임 색상 질문 */
-  if (/(프레임\s*색상|프레임.*색|기둥.*색|색상.*프레임)/.test(text)) {
+  if (/(프레임\s*색상.*어떻게|프레임\s*색상.*알려|프레임\s*색상.*선택|어떤\s*프레임\s*색|프레임\s*색상은)/.test(text)) {
     setQuick(['화이트', '블랙', '실버', '샴페인골드'], true); return;
   }
   /* 색상 전반 질문 (선반+프레임 동시 언급 또는 일반 색상 질문) */
