@@ -738,12 +738,14 @@ async function buildApiMessages(messages) {
       ? [{ role: 'user', content: '[이전 대화 계속]' }]
       : [];
 
-    return [
+    const built = [
       { role: 'user', content: `[이전 상담 요약] ${summary}` },
       { role: 'assistant', content: '네, 이전 상담 내용 파악했습니다. 계속 도와드릴게요.' },
       ...prefix,
       ...recentMsgs,
     ];
+    // 연속 동일 role 제거 (Anthropic API 요구사항)
+    return built.filter((m, i) => i === 0 || m.role !== built[i - 1].role);
   } catch (err) {
     console.warn('[buildApiMessages] 요약 실패, 슬라이딩 윈도우로 폴백:', err.message);
     return clean.slice(-MAX_API_MESSAGES);
@@ -912,8 +914,16 @@ app.post('/api/session/register', (req, res) => {
   }
   const sess = getOrCreateSession(sessionId);
   if (nickname && typeof nickname === 'string') {
-    sess.customerName = nickname.trim().slice(0, 20);
+    const trimmed = nickname.trim().slice(0, 20);
+    sess.customerName = trimmed;
     sess.customerNameIsTemp = false;
+    // 재방문 여부 확인
+    supabase
+      .from('conversations')
+      .select('id', { count: 'exact', head: true })
+      .eq('customer_name', trimmed)
+      .then(({ count }) => { sess.isReturning = (count || 0) > 0; })
+      .catch(() => { sess.isReturning = false; });
   }
   if (isTest === true) sess.isTest = true;
   res.json({ ok: true });
@@ -1632,7 +1642,7 @@ app.post('/api/summarize', async (req, res) => {
       messages: [
         {
           role: 'user',
-          content: `다음 상담 대화를 분석해서 JSON으로 추출해주세요:\n\n${messages.map(m => `${m.role === 'user' ? '고객' : '루마네'}: ${m.content}`).join('\n')}`,
+          content: `다음 상담 대화를 분석해서 JSON으로 추출해주세요:\n\n${messages.slice(-30).map(m => `${m.role === 'user' ? '고객' : '루마네'}: ${m.content}`).join('\n')}`,
         },
       ],
     });
