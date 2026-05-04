@@ -38,6 +38,8 @@ jobs:
                   value: ${{ secrets.SUPABASE_SECRET_KEY }}
                 - name: SUPABASE_URL
                   value: ${{ secrets.SUPABASE_URL }}
+                - name: DB_SCHEMA
+                  value: ${{ secrets.DB_SCHEMA }}
               buildenv: []
               healthz: /api/health
             context:
