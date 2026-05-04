@@ -86,6 +86,7 @@ function pruneArchive(archive) {
 
 function archiveCurrent() {
   if (!history || history.length === 0) return;
+  if (!history.some(m => m.role === 'user')) return;
   try {
     const raw = JSON.parse(localStorage.getItem(ARCHIVE_KEY) || '[]');
     const archive = pruneArchive(raw);
@@ -106,6 +107,8 @@ function clearHistory() {
 /* ── Admin 난입 상태 ── */
 let adminMode      = false;   // true = admin이 현재 대화 중
 let pollTimer      = null;    // 폴링 타이머
+let silentTimer    = null;    // 서버 재확인 타이머
+let updateTimer    = null;    // 배포 감지 타이머
 
 /* ================================================================
    서버 상태 확인
@@ -518,14 +521,34 @@ async function send(prefilledText) {
     const errDiv = document.createElement('div');
     errDiv.className = 'msg-group bot';
     errDiv.dataset.mid = errMid;
-    errDiv.innerHTML = `<div class="av">👩‍💼</div><div class="msg-body"><div class="msg-sender">루마네</div><div class="bubble bot">⚠️ 오류가 발생했습니다.<br>${esc(err.message)}${failedText ? `<br><button style="margin-top:8px;padding:4px 10px;font-size:12px;border:1px solid #e5e7eb;border-radius:6px;background:#fff;cursor:pointer;" data-retry>↩ 다시 시도</button>` : ''}</div></div>`;
+    const bubble = document.createElement('div');
+    bubble.className = 'bubble bot';
+    const errText = document.createElement('span');
+    errText.textContent = `⚠️ 오류가 발생했습니다. ${err.message}`;
+    bubble.appendChild(errText);
+    if (failedText) {
+      const retryBtn = document.createElement('button');
+      retryBtn.setAttribute('data-retry', '');
+      retryBtn.style.cssText = 'margin-top:8px;padding:4px 10px;font-size:12px;border:1px solid #e5e7eb;border-radius:6px;background:#fff;cursor:pointer;display:block;';
+      retryBtn.textContent = '↩ 다시 시도';
+      bubble.appendChild(retryBtn);
+    }
+    errDiv.innerHTML = '<div class="av">👩‍💼</div>';
+    const msgBody = document.createElement('div');
+    msgBody.className = 'msg-body';
+    msgBody.innerHTML = '<div class="msg-sender">루마네</div>';
+    msgBody.appendChild(bubble);
+    errDiv.appendChild(msgBody);
     document.getElementById('msgs').appendChild(errDiv);
     document.getElementById('msgs').scrollTop = 99999;
 
     if (failedText) {
       errDiv.querySelector('[data-retry]')?.addEventListener('click', () => {
         // history에서 실패한 user 메시지 제거 후 재전송
-        const idx = history.findLastIndex(m => m.role === 'user' && m.content === failedText);
+        let idx = -1;
+        for (let i = history.length - 1; i >= 0; i--) {
+          if (history[i].role === 'user' && history[i].content === failedText) { idx = i; break; }
+        }
         if (idx !== -1) history.splice(idx, 1);
         errDiv.remove();
         send(failedText);
@@ -814,7 +837,8 @@ async function startChat() {
   }
 
   /* 오프라인이면 30초마다 서버 재확인 (Render.com 절전 후 복귀 대응) */
-  setInterval(checkServerSilent, 30000);
+  if (silentTimer) clearInterval(silentTimer);
+  silentTimer = setInterval(checkServerSilent, 30000);
 
   /* 배포 자동감지 — 새 버전 배포 시 자동 새로고침 */
   startUpdateChecker();
@@ -832,7 +856,8 @@ async function startUpdateChecker() {
     if (r.ok) _deployedVersion = (await r.json()).v;
   } catch { /* 무시 */ }
 
-  setInterval(async () => {
+  if (updateTimer) clearInterval(updateTimer);
+  updateTimer = setInterval(async () => {
     if (!serverOnline) return;
     try {
       const r = await fetch(`${SERVER}/api/version?t=${Date.now()}`);

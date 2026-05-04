@@ -45,6 +45,7 @@ export function getIsLoading() { return isLoading; }
 export function setLoading(val) {
   isLoading = val;
   $inp.disabled = val;
+  $sendBtn.dataset.loading = val ? '1' : '';
   refreshSendBtn();
   if (val) {
     showTyping();

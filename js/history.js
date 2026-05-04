@@ -217,7 +217,7 @@ export function continueFromHistory(sessionId) {
   }
   summaryLines.push('');
   summaryLines.push('이어서 질문해 주세요!');
-  addMsg('assistant', summaryLines.join('\n'));
+  addMsg('bot', summaryLines.join('\n'));
 }
 
 window.showTranscript      = showTranscript;
