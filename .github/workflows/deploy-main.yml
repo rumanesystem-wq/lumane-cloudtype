@@ -4,8 +4,6 @@ on:
   push:
     branches:
       - main
-  schedule:
-    - cron: '0 0 * * *'  # 매일 오전 9시 (KST = UTC+9, 0시 UTC)
 
 jobs:
   deploy:
