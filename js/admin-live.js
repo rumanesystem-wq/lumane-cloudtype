@@ -415,7 +415,7 @@ function _refreshDashBadge() {
     const lastSeen = _seenMsgCounts[String(s.id)];
     return lastSeen !== undefined && (s.messageCount ?? 0) > lastSeen;
   }).length;
-  const convNew = _cachedConversations.filter(c => c.id && !seen.has(c.id)).length;
+  const convNew = _cachedConversations.filter(c => c.id && !seen.has(String(c.id))).length;
   const total   = liveNew + convNew;
   [document.getElementById('dashNewBadge'), document.getElementById('sidebarDashBadge')].forEach(badge => {
     if (!badge) return;
