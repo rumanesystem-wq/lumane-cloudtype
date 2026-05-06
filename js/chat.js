@@ -17,8 +17,17 @@ const SESSION_ID = (() => {
 /* ── 테스트 모드: URL에 ?test=1 파라미터가 있으면 활성화 ── */
 const IS_TEST = new URLSearchParams(window.location.search).get('test') === '1';
 
-/* ── 닉네임: localStorage에 저장 ── */
+/* ── 닉네임: localStorage에 저장 (랜덤 생성) ── */
 const NICKNAME_KEY = '루마네_닉네임';
+const _NICK_COLORS  = ['빨간','주황','노란','초록','파란','보라','분홍','하늘','민트','금빛'];
+const _NICK_ANIMALS = ['토끼','곰','고양이','강아지','여우','판다','코알라','사슴','너구리','햄스터'];
+function _generateNickname() {
+  const c = _NICK_COLORS[Math.floor(Math.random() * _NICK_COLORS.length)];
+  const a = _NICK_ANIMALS[Math.floor(Math.random() * _NICK_ANIMALS.length)];
+  const id = c + a;
+  localStorage.setItem(NICKNAME_KEY, id);
+  return id;
+}
 let userNickname = localStorage.getItem(NICKNAME_KEY) || '';
 import { todayStr, esc } from './utils.js';
 import {
@@ -753,8 +762,8 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   nicknameInput.addEventListener('input', () => { nicknameError.textContent = ''; });
 
-  // 닉네임 입력 생략 — 바로 상담 시작
-  if (!userNickname) userNickname = '고객';
+  // 닉네임 입력 생략 — 없으면 랜덤 생성
+  if (!userNickname) userNickname = _generateNickname();
   nicknameOverlay.classList.add('hidden');
   startChat();
 });
