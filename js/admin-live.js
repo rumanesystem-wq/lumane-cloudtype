@@ -92,10 +92,11 @@ function startBgPolling() {
       const data = await res.json();
       const sessions = data.sessions || [];
       const count       = sessions.length;
-      const unreadCount = sessions.filter(s => s.id && !_getSeenSessions().has(s.id)).length;
+      const activeCount = sessions.filter(s => (s.messageCount ?? 0) > 0).length;
+      const unreadCount = sessions.filter(s => s.id && !_getSeenSessions().has(String(s.id))).length;
       const badge   = document.getElementById('liveBadge');
       const countEl = document.getElementById('liveCount');
-      if (badge) { badge.style.display = count > 0 ? 'inline' : 'none'; badge.textContent = count; }
+      if (badge) { badge.style.display = activeCount > 0 ? 'inline' : 'none'; badge.textContent = activeCount; }
       if (countEl) countEl.textContent  = count + '개 세션';
       // 대시보드도 업데이트
       _checkLiveNotifications(sessions);
@@ -193,11 +194,12 @@ function renderLiveSessionList(sessions) {
     return;
   }
 
-  // 라이브 탭 배지 (다른 탭에서 볼 때)
+  // 라이브 탭 배지 (다른 탭에서 볼 때) — 실제로 채팅 시작한 세션만 카운트
   const currentTab = document.querySelector('.tab-btn.active')?.id;
-  if (currentTab !== 'tab-live' && sessions.length > 0) {
+  const activeSessions = sessions.filter(s => (s.messageCount ?? 0) > 0).length;
+  if (currentTab !== 'tab-live' && activeSessions > 0) {
     const badge = document.getElementById('liveBadge');
-    if (badge) { badge.style.display = 'inline'; badge.textContent = sessions.length; }
+    if (badge) { badge.style.display = 'inline'; badge.textContent = activeSessions; }
   }
 
   if (!container) { renderDashboardSessions(sessions); return; }
@@ -429,8 +431,9 @@ function _refreshDashBadge() {
   if (statCard)   statCard.classList.toggle('no-unread', total === 0);
   const liveBadge = document.getElementById('liveBadge');
   if (liveBadge) {
-    liveBadge.textContent = _cachedLiveSessions.length;
-    liveBadge.style.display = _cachedLiveSessions.length > 0 ? 'inline' : 'none';
+    const activeCount = _cachedLiveSessions.filter(s => (s.messageCount ?? 0) > 0).length;
+    liveBadge.textContent = activeCount;
+    liveBadge.style.display = activeCount > 0 ? 'inline' : 'none';
   }
 }
 
