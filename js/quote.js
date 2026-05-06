@@ -119,12 +119,7 @@ export function printQuote() {
   const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
   const blobUrl = URL.createObjectURL(blob);
   win.location.href = blobUrl;
-  const printTimer = setTimeout(() => {
-    try { win.focus(); win.print(); } catch {}
-    URL.revokeObjectURL(blobUrl);
-  }, 800);
   win.addEventListener('load', () => {
-    clearTimeout(printTimer);
     win.focus();
     win.print();
     URL.revokeObjectURL(blobUrl);
@@ -144,6 +139,7 @@ export async function autoSaveConversation(history) {
     const data = await res.json();
     if (!data.success) throw new Error(data.error || '저장 실패');
     console.log('✅ 상담 자동 저장 완료:', data.summary?.이름 || '(이름 미확인)');
+
     return data.summary;
   } catch (err) {
     console.error('⚠️ 상담 자동 저장 실패 (재시도 없음):', err.message);

@@ -8,8 +8,8 @@
   --green:       #10b981;
   --gray-100:    #f3f4f6;
   --gray-200:    #e5e7eb;
-  --gray-400:    #9ca3af;
-  --gray-600:    #6b7280;
+  --gray-400:    #6b7280;   /* 대비 상향: #9ca3af → #6b7280 */
+  --gray-600:    #4b5563;   /* 대비 상향: #6b7280 → #4b5563 */
   --gray-900:    #2c2820;   /* 케이트블랑 다크 */
   --white:       #ffffff;
   --chat-bg:     #faf9f7;   /* 케이트블랑 웜화이트 */
@@ -146,6 +146,12 @@ html, body {
     min-height: unset;
     overflow: hidden;
   }
+  /* iOS Safari: 키보드 팝업 시 레이아웃 밀림 방지 */
+  @supports (-webkit-touch-callout: none) {
+    .shell {
+      height: -webkit-fill-available;
+    }
+  }
 
   /* 입력창 하단 safe area (안드로이드 제스처 네비 + iOS 홈바) */
   .input-bar {
@@ -163,7 +169,7 @@ html, body {
   .h-av { width: 38px; height: 38px; font-size: 18px; }
   .h-name { font-size: 14px; }
   .h-sub  { font-size: 10.5px; }
-  .h-status span { display: none; }
+  .h-status span { font-size: 10px; }
   .h-history-btn, .h-collect-btn { display: none !important; }
   .h-search-btn { font-size: 15px; padding: 5px 7px; }
 }
@@ -413,17 +419,18 @@ html, body {
 .msg-group.bot .msg-meta  { align-items: flex-start; }
 .msg-group.user .msg-meta { align-items: flex-end; }
 
-/* 읽음 표시 "1" */
+/* 읽음 표시 */
 .read-receipt {
-  font-size: 10.5px;
-  font-weight: 700;
+  font-size: 12px;
+  font-weight: 600;
   color: var(--purple);
   line-height: 1;
 }
+.read-receipt::before { content: '읽음 '; font-weight: 400; font-size: 11px; }
 
 /* 시간 */
 .msg-time {
-  font-size: 10.5px;
+  font-size: 11px;
   color: var(--gray-400);
   white-space: nowrap;
 }
@@ -482,6 +489,13 @@ html, body {
   pointer-events: none;
   white-space: nowrap;
 }
+/* 모바일: 입력창 위가 아닌 상단으로 이동 (콘텐츠 가림 방지) */
+@media (max-width: 767px) {
+  .copy-toast {
+    bottom: auto;
+    top: max(16px, env(safe-area-inset-top));
+  }
+}
 
 /* ── 퀵 답변 버튼 ───────────────────────────────── */
 .quick-area {
@@ -495,8 +509,9 @@ html, body {
 .quick-area:empty { display: none; }
 
 .quick-hint-label {
-  font-size: 11px;
-  color: var(--gray-400);
+  font-size: 11.5px;
+  color: var(--purple);
+  font-weight: 600;
   letter-spacing: .01em;
 }
 
@@ -505,22 +520,22 @@ html, body {
 }
 
 .qbtn {
-  padding: 5px 13px;
+  padding: 6px 14px;
   border-radius: 16px;
-  border: 1px dashed #d1d5db;
-  background: #f9fafb;
-  color: var(--gray-600);
-  font-size: 13px; font-weight: 400;
+  border: 1.5px solid var(--purple-mid);
+  background: var(--purple-pale);
+  color: #8a6a30;
+  font-size: 13px; font-weight: 500;
   cursor: pointer; font-family: 'Noto Sans KR', sans-serif;
   transition: all .15s;
 }
-.qbtn:hover { background: var(--gray-100); color: var(--gray-900); }
+.qbtn:hover { background: var(--purple-mid); color: var(--gray-900); }
 
 .qbtn.choice {
   background: #faf3e0;
-  border: 1px solid var(--purple-mid);
+  border: 1.5px solid var(--purple);
   color: #a8883f;
-  font-weight: 500;
+  font-weight: 600;
 }
 .qbtn.choice:hover { background: var(--purple-pale); }
 
@@ -653,7 +668,7 @@ html, body {
 .btn-new {
   padding: 14px 36px;
   background: linear-gradient(135deg, #c9a96e, #a8883f);
-  color: var(--white); border: none; border-radius: 30px;
+  color: var(--white); border: none; border-radius: 24px;
   font-size: 15px; font-weight: 700; cursor: pointer;
   font-family: 'Noto Sans KR', sans-serif;
   box-shadow: 0 4px 14px rgba(201,169,110,.3);
@@ -708,6 +723,22 @@ html, body {
 }
 .send:hover:not(:disabled) { transform: scale(1.08); }
 .send:disabled { opacity: .35; cursor: not-allowed; transform: none; }
+/* 로딩 중: 스피너로 교체 */
+.send[data-loading="1"] {
+  opacity: 1 !important;
+  cursor: wait;
+  font-size: 0;
+}
+.send[data-loading="1"]::after {
+  content: '';
+  display: block;
+  width: 16px; height: 16px;
+  border: 2px solid rgba(255,255,255,.35);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin-send .6s linear infinite;
+}
+@keyframes spin-send { to { transform: rotate(360deg); } }
 
 /* 이모티콘 피커 */
 .emoji-picker {
@@ -771,7 +802,19 @@ html, body {
   transition: max-height .35s ease, padding .3s ease;
   flex-shrink: 0;
 }
-.history-drawer.open { max-height: 600px; overflow-y: auto; }
+.history-drawer.open {
+  max-height: 600px;
+  overflow-y: auto;
+  /* 스크롤 가능 표시: 하단 그림자 힌트 */
+  background:
+    linear-gradient(var(--white) 30%, transparent),
+    linear-gradient(transparent, var(--white) 70%) 0 100%,
+    radial-gradient(farthest-side at 50% 0, rgba(0,0,0,.08), transparent),
+    radial-gradient(farthest-side at 50% 100%, rgba(0,0,0,.08), transparent) 0 100%;
+  background-repeat: no-repeat;
+  background-size: 100% 40px, 100% 40px, 100% 12px, 100% 12px;
+  background-attachment: local, local, scroll, scroll;
+}
 .history-drawer-inner { padding: 14px 16px 14px; }
 
 .history-drawer-title {
@@ -884,7 +927,7 @@ html, body {
 }
 .transcript-box-head .close-btn:hover { background: var(--gray-200); }
 .transcript-box-meta {
-  font-size: 11px; color: var(--gray-400);
+  font-size: 12px; color: var(--gray-400);
 }
 .transcript-msgs {
   flex: 1; overflow-y: auto;
@@ -924,6 +967,7 @@ html, body {
 .h-collect-btn {
   display: flex; align-items: center; gap: 5px;
   padding: 5px 11px;
+  min-height: 36px;
   background: rgba(255,255,255,.18);
   border: 1.5px solid rgba(255,255,255,.35);
   border-radius: 16px;
@@ -985,7 +1029,7 @@ html, body {
 .qt-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 12.5px;
+  font-size: 14px;
 }
 .qt-table td {
   border: 1px solid #999;
@@ -1010,8 +1054,8 @@ html, body {
 }
 .qt-table td.sub-lbl {
   background: #efefef;
-  font-size: 11.5px;
-  color: #444;
+  font-size: 13px;
+  color: #333;
   text-align: center;
   white-space: nowrap;
 }
@@ -1019,12 +1063,12 @@ html, body {
   background: #555;
   color: #fff;
   font-weight: 700;
-  font-size: 11px;
+  font-size: 12px;
   text-align: center;
 }
 .qt-table td.footer-val {
-  font-size: 10.5px;
-  color: #333;
+  font-size: 12px;
+  color: #222;
 }
 
 .qt-table td[contenteditable="true"] {
@@ -1037,11 +1081,27 @@ html, body {
 }
 
 .qt-check-wrap {
-  display: flex; align-items: center; gap: 5px;
+  display: flex; align-items: center; gap: 6px;
 }
 .qt-check-wrap input[type="checkbox"] {
-  width: 14px; height: 14px; cursor: pointer;
+  width: 20px; height: 20px; cursor: pointer;
   accent-color: #c0392b;
+  flex-shrink: 0;
+}
+/* 모바일: 체크박스 터치 영역 최소 44px 확보 */
+@media (max-width: 767px) {
+  .qt-check-wrap {
+    min-height: 44px;
+  }
+  .qt-check-wrap input[type="checkbox"] {
+    width: 22px; height: 22px;
+  }
+  .quote-inner {
+    overflow-x: auto;
+  }
+  .qt-table {
+    min-width: 360px;
+  }
 }
 
 .qt-floor-plan {
@@ -1069,7 +1129,7 @@ html, body {
 .qa-print { background: var(--purple); color: #fff; }
 .qa-close { background: var(--gray-200); color: var(--gray-900); }
 .qa-print:hover { opacity: .88; }
-.qa-close:hover { background: var(--gray-400); color: #fff; }
+.qa-close:hover { background: #9ca3af; color: #fff; }
 
 .collect-drawer {
   background: var(--white);
@@ -1118,7 +1178,7 @@ html, body {
   display: flex; align-items: center; gap: 8px;
 }
 .collect-bar-wrap {
-  flex: 1; height: 5px; background: var(--gray-200); border-radius: 4px; overflow: hidden;
+  flex: 1; height: 8px; background: var(--gray-200); border-radius: 4px; overflow: hidden;
 }
 .collect-bar {
   height: 100%;
@@ -1126,7 +1186,7 @@ html, body {
   border-radius: 4px;
   transition: width .4s ease;
 }
-.collect-pct { font-size: 11px; font-weight: 700; color: var(--purple); min-width: 28px; text-align: right; }
+.collect-pct { font-size: 13px; font-weight: 700; color: var(--purple); min-width: 32px; text-align: right; }
 
 .rc-section { margin-top: 14px; }
 .rc-section-title {
@@ -1191,8 +1251,13 @@ html, body {
   flex-shrink: 0; background: none; border: none;
   font-size: 14px; color: var(--gray-500); cursor: pointer;
   padding: 4px 6px; border-radius: 6px; line-height: 1;
+  min-width: 36px; min-height: 36px;
+  display: flex; align-items: center; justify-content: center;
 }
 .attach-remove:hover { background: var(--gray-200); color: var(--gray-800); }
+@media (max-width: 767px) {
+  .attach-remove { min-width: 44px; min-height: 44px; font-size: 16px; }
+}
 
 /* ── 이미지 붙여넣기 미리보기 오버레이 ─────────── */
 .img-preview-overlay {
@@ -1277,7 +1342,7 @@ html, body {
   background: var(--purple); flex-shrink: 0;
 }
 .rb-content { flex: 1; min-width: 0; }
-.rb-who { font-size: 11px; font-weight: 700; color: var(--purple); }
+.rb-who { font-size: 12px; font-weight: 700; color: var(--purple); }
 .rb-preview { font-size: 12px; color: var(--gray-600); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .rb-close {
   background: none; border: none; font-size: 15px;

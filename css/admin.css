@@ -1,4 +1,14 @@
 /* =============================================
+   색상 대비 보정 (WCAG AA 기준)
+   #9ca3af(3.0:1) → #6b7280(4.5:1)
+   #6b7280(4.5:1) → #4b5563(7.0:1)
+============================================= */
+:root {
+  --text-muted:    #4b5563;   /* 보조 텍스트 (기존 #6b7280) */
+  --text-disabled: #6b7280;   /* 비활성 텍스트 (기존 #9ca3af) */
+}
+
+/* =============================================
    전체 레이아웃 & 기본 스타일
 ============================================= */
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -145,6 +155,24 @@ body {
   border-bottom: 1px solid #e5e7eb;
   display: flex;
   gap: 0;
+  position: relative;
+}
+/* 탭 우측 스크롤 힌트 페이드 */
+.tab-bar::after {
+  content: '';
+  position: absolute;
+  right: 0;
+  top: 0;
+  width: 40px;
+  height: 100%;
+  background: linear-gradient(to right, transparent, #fff 80%);
+  pointer-events: none;
+  display: none;
+}
+@media (max-width: 900px) {
+  .tab-bar { padding: 0 8px; overflow-x: auto; scrollbar-width: none; }
+  .tab-bar::-webkit-scrollbar { display: none; }
+  .tab-bar::after { display: block; }
 }
 
 .tab-btn {
@@ -179,9 +207,9 @@ body {
   border: 1px solid #e5e7eb;
 }
 
-.stat-label { font-size: 12px; color: #6b7280; font-weight: 500; }
+.stat-label { font-size: 12px; color: var(--text-muted); font-weight: 500; }
 .stat-value { font-size: 28px; font-weight: 700; color: #1a1a2e; margin-top: 6px; }
-.stat-change { font-size: 12px; margin-top: 4px; color: #6b7280; }
+.stat-change { font-size: 12px; margin-top: 4px; color: var(--text-muted); }
 .stat-change.up { color: #16a34a; }
 .stat-change.down { color: #dc2626; }
 
@@ -375,9 +403,9 @@ body {
 }
 
 .quote-name { font-size: 14px; font-weight: 600; }
-.quote-phone { font-size: 13px; color: #6b7280; }
+.quote-phone { font-size: 13px; color: var(--text-muted); }
 .quote-region { font-size: 13px; color: #374151; }
-.quote-date { font-size: 12px; color: #9ca3af; }
+.quote-date { font-size: 12px; color: var(--text-disabled); }
 .quote-manager { font-size: 13px; color: #374151; }
 
 /* 상태 배지 */
@@ -809,11 +837,11 @@ body {
 /* 모바일 뒤로가기 버튼 (기본 숨김) */
 .live-back-btn {
   display: none;
-  width: 32px; height: 32px;
+  width: 44px; height: 44px;
   background: #f3f4f6;
   border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  font-size: 16px;
+  border-radius: 10px;
+  font-size: 20px;
   cursor: pointer;
   align-items: center;
   justify-content: center;
@@ -822,7 +850,7 @@ body {
 }
 
 /* =============================================
-   모바일 반응형 (900px 미만)
+   모바일 반응형 (768px 미만)
 ============================================= */
 @media (max-width: 900px) {
   /* 햄버거 표시 */
@@ -1020,12 +1048,12 @@ body {
   color: #1a1a2e;
   line-height: 1;
   margin-bottom: 6px;
-  word-break: keep-all;
 }
 .stats-card--total .stats-value { color: #fff; }
 .stats-sub {
   font-size: 12px;
   color: #6b7280;
+  word-break: keep-all;
 }
 .stats-card--total .stats-sub { color: #9ca3af; }
 .stats-card--unread {

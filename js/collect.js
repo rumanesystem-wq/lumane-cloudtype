@@ -30,7 +30,7 @@ export function updateCollectDrawer(demoIdx) {
   document.getElementById('collectPct').textContent = pct + '%';
 
   const btn = document.getElementById('collectBtn');
-  btn.textContent = `📋 ${done.length}/${TOTAL_ITEMS}`;
+  if (btn) btn.textContent = `📋 ${done.length}/${TOTAL_ITEMS}`;
 
   // 모두 수집되면 드로어 자동 열기
   if (done.length >= TOTAL_ITEMS) {
@@ -42,5 +42,6 @@ export function updateCollectDrawer(demoIdx) {
 export function resetCollect() {
   updateCollectDrawer(0);
   document.getElementById('collectDrawer').classList.remove('open');
-  document.getElementById('collectBtn').textContent = '📋 수집현황';
+  const resetBtn = document.getElementById('collectBtn');
+  if (resetBtn) resetBtn.textContent = '📋 수집현황';
 }

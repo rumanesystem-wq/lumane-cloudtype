@@ -84,9 +84,7 @@ const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
 
 function requireAdmin(req, res, next) {
   if (!ADMIN_TOKEN) {
-    // 토큰 미설정 시 서버 콘솔에 경고 (운영 중엔 항상 설정할 것)
-    console.warn('⚠️  ADMIN_TOKEN이 .env에 설정되지 않았습니다. Admin API가 무방비 상태입니다.');
-    return next();
+    return res.status(403).json({ error: 'Admin 기능이 비활성화되어 있습니다.' });
   }
   const auth = req.headers['authorization'];
   if (auth !== `Bearer ${ADMIN_TOKEN}`) {
@@ -107,40 +105,27 @@ const sessions = new Map();
 // 토큰 사용량 → Supabase에 영구 저장
 async function addTokenUsage(sessionId, usage) {
   if (!usage || !sessionId) return;
-  const i  = usage.input_tokens || 0;
-  const o  = usage.output_tokens || 0;
-  const cw = usage.cache_creation_input_tokens || 0;
-  const cr = usage.cache_read_input_tokens || 0;
-  const customerName = sessions.get(sessionId)?.customerName || null;
+  const sess = sessions.get(sessionId);
+  if (!sess) return;
+
+  // 메모리에 먼저 누적 (race condition 방지)
+  sess.tokens.input     += usage.input_tokens || 0;
+  sess.tokens.output    += usage.output_tokens || 0;
+  sess.tokens.cacheWrite += usage.cache_creation_input_tokens || 0;
+  sess.tokens.cacheRead  += usage.cache_read_input_tokens || 0;
+  sess.tokens.turns      += 1;
 
   try {
-    const { data: existing } = await supabase
-      .from('token_stats')
-      .select('id, input_tokens, output_tokens, cache_write_tokens, cache_read_tokens, turns')
-      .eq('session_id', sessionId)
-      .single();
-
-    if (existing) {
-      await supabase.from('token_stats').update({
-        input_tokens:       existing.input_tokens + i,
-        output_tokens:      existing.output_tokens + o,
-        cache_write_tokens: existing.cache_write_tokens + cw,
-        cache_read_tokens:  existing.cache_read_tokens + cr,
-        turns:              existing.turns + 1,
-        customer_name:      customerName,
-        updated_at:         new Date().toISOString(),
-      }).eq('id', existing.id);
-    } else {
-      await supabase.from('token_stats').insert({
-        session_id:         sessionId,
-        customer_name:      customerName,
-        input_tokens:       i,
-        output_tokens:      o,
-        cache_write_tokens: cw,
-        cache_read_tokens:  cr,
-        turns:              1,
-      });
-    }
+    await supabase.from('token_stats').upsert({
+      session_id:         sessionId,
+      customer_name:      sess.customerName || null,
+      input_tokens:       sess.tokens.input,
+      output_tokens:      sess.tokens.output,
+      cache_write_tokens: sess.tokens.cacheWrite,
+      cache_read_tokens:  sess.tokens.cacheRead,
+      turns:              sess.tokens.turns,
+      updated_at:         new Date().toISOString(),
+    }, { onConflict: 'session_id' });
   } catch (err) {
     console.error('토큰 저장 오류:', err.message);
   }
@@ -168,6 +153,7 @@ function getOrCreateSession(sessionId) {
       adminTyping: false,     // 상담원이 입력 중 여부
       customerTyping: false,  // 고객이 입력 중 여부
       fallbackSent: false,    // API 오류 fallback 메시지 이미 보냈는지
+      tokens: { input: 0, output: 0, cacheWrite: 0, cacheRead: 0, turns: 0 },
     });
   }
   return sessions.get(sessionId);
@@ -255,7 +241,7 @@ function parseOrderSheet(text) {
     shelf_color:     shelf_color || null,
     size_raw,
     options_text,
-    estimated_price: priceNum(get(/총\s*합계[:\s*]*([0-9,]+)원/)) || priceNum(get(/견적[:\s]+([0-9,]+)원/)),
+    estimated_price: priceNum(get(/총\s*합계[:\s*]*([0-9,]+)원/)) || priceNum(get(/견적[:\s]+([0-9,]+)원/)) || priceNum(get(/할인\s*후\s*금액[:\s*]*([0-9,]+)원/)) || priceNum(get(/할인후\s*금액[:\s*]*([0-9,]+)원/)) || priceNum(get(/최종\s*금액[:\s*]*([0-9,]+)원/)),
   };
 }
 
@@ -283,24 +269,13 @@ async function autoRegisterQuote(sess, reply) {
     source:         'AI상담',
   };
 
-  const { data: existing } = await supabase
-    .from('quotes')
-    .select('id')
-    .eq('quote_number', quoteNumber)
-    .maybeSingle();
-
-  if (existing) {
-    await supabase.from('quotes').update(payload).eq('id', existing.id);
-  } else {
-    await supabase.from('quotes').insert([payload]);
-    console.log(`✅ AI 견적 자동 등록: ${quoteNumber} (${payload.name})`);
-  }
+  await supabase.from('quotes').upsert(payload, { onConflict: 'quote_number' });
+  console.log(`✅ AI 견적 자동 등록: ${quoteNumber} (${payload.name})`);
 }
 
 // ── 실시간 Supabase upsert (Notion 없음) ─────────────────────
 async function upsertConversation(sess) {
   if (!sess || !sess.messages || sess.messages.length === 0) return;
-  if (sess.isTest) return; // 테스트 세션은 DB 저장 제외
   // 고객 메시지가 하나도 없으면 저장하지 않음 (인사만 보고 나간 경우)
   const userMsgCount = sess.messages.filter(m => m.role === 'user').length;
   if (userMsgCount === 0) return;
@@ -312,6 +287,7 @@ async function upsertConversation(sess) {
     const parsed = orderMsg ? parseOrderSheet(orderMsg.content) : {};
     const estimatedPrice = parsed.estimated_price || null;
 
+    const table = sess.isTest ? 'test_conversations' : 'conversations';
     const payload = {
       session_id:      sess.id,
       save_reason:     'realtime',
@@ -330,17 +306,7 @@ async function upsertConversation(sess) {
       messages:        sess.messages,
     };
 
-    const { data: existing } = await supabase
-      .from('conversations')
-      .select('id')
-      .eq('session_id', sess.id)
-      .maybeSingle();
-
-    if (existing) {
-      await supabase.from('conversations').update(payload).eq('session_id', sess.id);
-    } else {
-      await supabase.from('conversations').insert(payload);
-    }
+    await supabase.from(table).upsert(payload, { onConflict: 'session_id' });
   } catch (err) {
     console.error('실시간 저장 오류:', err.message);
   }
@@ -352,7 +318,8 @@ async function saveConversation(sess, reason) {
   try {
     // 실시간 저장 데이터 최신화 + save_reason 업데이트
     await upsertConversation(sess);
-    await supabase.from('conversations')
+    const saveTable = sess.isTest ? 'test_conversations' : 'conversations';
+    await supabase.from(saveTable)
       .update({ save_reason: reason })
       .eq('session_id', sess.id);
 
@@ -438,34 +405,6 @@ app.get('/api/health', (req, res) => {
 });
 
 // ── 이전 상담 이력 조회 API (전화번호로 필터링) ───────────────
-app.get('/api/consultation-history', async (req, res) => {
-  const { phone } = req.query;
-  if (!phone) return res.status(400).json({ error: 'phone 파라미터가 필요합니다' });
-
-  const cleanPhone = phone.replace(/[-\s]/g, '');
-
-  try {
-    const { data, error } = await supabase
-      .from('conversations')
-      .select('id, saved_at, messages, customer_name, phone, region, layout, size_raw, estimated_price')
-      .not('phone', 'is', null)
-      .order('saved_at', { ascending: false })
-      .limit(30);
-
-    if (error) throw error;
-
-    // 전화번호 정규화 후 필터링
-    const filtered = (data || []).filter(row => {
-      const p = (row.phone || '').replace(/[-\s]/g, '');
-      return p && p === cleanPhone;
-    });
-
-    res.json({ consultations: filtered });
-  } catch (err) {
-    console.error('이력 조회 오류:', err.message);
-    res.status(500).json({ error: '조회 중 오류가 발생했습니다' });
-  }
-});
 
 // ── 버전 체크 (배포 자동감지용) ───────────────────────────────
 // 서버 시작 시각 = 버전. 배포마다 서버가 재시작되므로 값이 달라짐.
@@ -532,6 +471,10 @@ app.get('/api/og', async (req, res) => {
   const { url } = req.query;
   if (!url || !/^https?:\/\//i.test(url)) {
     return res.status(400).json({ error: 'url 파라미터가 필요합니다' });
+  }
+  const BLOCKED_IP = /^https?:\/\/(localhost|127\.|0\.0\.0\.|10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|::1|169\.254\.)/i;
+  if (BLOCKED_IP.test(url)) {
+    return res.status(400).json({ error: '허용되지 않는 URL입니다' });
   }
 
   // YouTube: oEmbed API로 제목 + 썸네일 가져오기
@@ -665,6 +608,10 @@ app.get('/api/find-example', chatRateLimit, async (req, res) => {
 async function isRelevantMessage(userMessage) {
   try {
     const safeMsg = (typeof userMessage === 'string' ? userMessage : JSON.stringify(userMessage)).slice(0, 500);
+
+    // 전화번호 패턴 포함 시 Haiku 호출 없이 통과 (이름+번호 입력 차단 방지)
+    if (/01[0-9][-\s]?\d{3,4}[-\s]?\d{4}/.test(safeMsg)) return true;
+
     const check = await client.messages.create({
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 10,
@@ -676,6 +623,7 @@ async function isRelevantMessage(userMessage) {
 - 치수, 크기, 사이즈, 평수, 가격, 견적, 배송 관련 언급
 - 짧은 답변, 감탄사, 일상 반응 (네, 아니요, 좋아요, 고마워요, ㅋㅋ 등)
 - 고객 상황 설명 (바빠요, 외출 중, 아직 이사 전, 남편한테 물어봐야 해요 등)
+- 이름 또는 전화번호 제공 (성함, 연락처 요청에 대한 답변 — 예: "홍길동 010-0000-0000")
 
 차단 대상 (NO):
 - 정치, 선거, 정당 관련 발언
@@ -907,26 +855,78 @@ app.post('/api/chat', chatRateLimit, async (req, res) => {
 });
 
 // ── 세션 등록 API ─────────────────────────────────────────────
-app.post('/api/session/register', (req, res) => {
-  const { sessionId, nickname, isTest } = req.body;
+app.post('/api/session/register', async (req, res) => {
+  const { sessionId, nickname, isTest, src, src2 } = req.body;
   if (!sessionId || !SESSION_ID_RE.test(sessionId)) {
     return res.status(400).json({ error: '유효하지 않은 sessionId' });
   }
   const sess = getOrCreateSession(sessionId);
   if (nickname && typeof nickname === 'string') {
     const trimmed = nickname.trim().slice(0, 20);
+    sess.nickname = trimmed;
     sess.customerName = trimmed;
-    sess.customerNameIsTemp = false;
-    // 재방문 여부 확인
-    supabase
-      .from('conversations')
-      .select('id', { count: 'exact', head: true })
-      .eq('customer_name', trimmed)
-      .then(({ count }) => { sess.isReturning = (count || 0) > 0; })
-      .catch(() => { sess.isReturning = false; });
+    sess.customerNameIsTemp = true;
   }
   if (isTest === true) sess.isTest = true;
+  // 유입 소스 저장 (메모리 + DB)
+  if (src && typeof src === 'string')   sess.src  = src.trim().slice(0, 50);
+  if (src2 && typeof src2 === 'string') sess.src2 = src2.trim().slice(0, 50);
+  if (sess.src || sess.src2) {
+    supabase.from('visitor_logs').upsert(
+      {
+        session_id: sessionId,
+        src: sess.src || null,
+        src2: sess.src2 || null,
+        visited_date: new Date().toISOString().slice(0, 10),
+      },
+      { onConflict: 'session_id,visited_date', ignoreDuplicates: true }
+    ).then(({ error }) => {
+      if (error) console.warn('[visitor_logs] 저장 실패:', error.message);
+    });
+  }
+  // 재방문 여부 확인
+  if (sess.nickname && sess.isReturning === undefined) {
+    try {
+      const { count } = await supabase
+        .from('conversations')
+        .select('id', { count: 'exact', head: true })
+        .eq('customer_name', sess.nickname);
+      sess.isReturning = (count || 0) > 0;
+    } catch { sess.isReturning = false; }
+  }
   res.json({ ok: true });
+});
+
+// ── 어드민: 유입 소스 통계 ────────────────────────────────
+app.get('/api/admin/source-stats', async (req, res) => {
+  const VALID_PERIODS = ['today', 'week', 'month', 'all'];
+  const period = VALID_PERIODS.includes(req.query.period) ? req.query.period : 'today';
+  let query = supabase.from('visitor_logs').select('src, src2, session_id, visited_date');
+  const today = new Date().toISOString().slice(0, 10);
+  if (period === 'today') {
+    query = query.eq('visited_date', today);
+  } else if (period === 'week') {
+    const d = new Date(); d.setDate(d.getDate() - 6);
+    query = query.gte('visited_date', d.toISOString().slice(0, 10));
+  } else if (period === 'month') {
+    const d = new Date(); d.setMonth(d.getMonth() - 1);
+    query = query.gte('visited_date', d.toISOString().slice(0, 10));
+  }
+  try {
+    const { data, error } = await query;
+    if (error) throw error;
+    const counts = {};
+    (data || []).forEach(r => {
+      const key = r.src || '직접';
+      counts[key] = (counts[key] || 0) + 1;
+    });
+    const list = Object.entries(counts)
+      .map(([src, count]) => ({ src, count }))
+      .sort((a, b) => b.count - a.count);
+    res.json({ period, total: (data || []).length, counts: list });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ── 세션 상태 폴링 API (고객 → 서버, 2초마다) ─────────────────
@@ -961,6 +961,8 @@ app.get('/api/admin/sessions', async (_req, res) => {
       lastActivity: sess.lastActivity,
       lastMessageAt: sess.lastMessageAt || sess.startedAt,
       isTest: sess.isTest || false,
+      isReturning: sess.isReturning || false,
+      nickname: sess.nickname || null,
     });
     sessionIds.push(id);
   }
@@ -1221,13 +1223,17 @@ app.post('/api/admin/message', (req, res) => {
 // ── 어드민: 저장된 상담 목록 조회 ────────────────────────────
 app.get('/api/admin/conversations', async (req, res) => {
   try {
-    const { data, error } = await supabase
-      .from('conversations')
-      .select('*')
-      .order('id', { ascending: false })
-      .limit(200);
-    if (error) throw error;
-    res.json({ conversations: data });
+    const [{ data: real, error: e1 }, { data: test, error: e2 }] = await Promise.all([
+      supabase.from('conversations').select('*').order('id', { ascending: false }).limit(200),
+      supabase.from('test_conversations').select('*').order('id', { ascending: false }).limit(200),
+    ]);
+    if (e1) throw e1;
+    if (e2) throw e2;
+    const merged = [
+      ...(real || []),
+      ...(test || []).map(c => ({ ...c, is_test: true })),
+    ].sort((a, b) => b.id - a.id).slice(0, 200);
+    res.json({ conversations: merged });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1606,6 +1612,8 @@ app.post('/api/summarize', async (req, res) => {
     return res.status(400).json({ error: 'messages 배열이 필요합니다.' });
   }
 
+  const recentMessages = messages.slice(-30);
+
   try {
     // Claude에게 대화 내용 분석 요청
     const response = await client.messages.create({
@@ -1642,7 +1650,7 @@ app.post('/api/summarize', async (req, res) => {
       messages: [
         {
           role: 'user',
-          content: `다음 상담 대화를 분석해서 JSON으로 추출해주세요:\n\n${messages.slice(-30).map(m => `${m.role === 'user' ? '고객' : '루마네'}: ${m.content}`).join('\n')}`,
+          content: `다음 상담 대화를 분석해서 JSON으로 추출해주세요:\n\n${recentMessages.map(m => `${m.role === 'user' ? '고객' : '루마네'}: ${m.content}`).join('\n')}`,
         },
       ],
     });

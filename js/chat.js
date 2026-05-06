@@ -4,31 +4,56 @@
 import { SERVER, DEMO } from './config.js';
 
 /* ── 세션 ID: localStorage에 저장하여 새로고침해도 유지 ── */
-const SESSION_ID = (() => {
-  const KEY = '루마네_세션ID';
-  let id = localStorage.getItem(KEY);
-  if (!id || !/^S-\d{13}-[a-z0-9]{5}$/.test(id)) {
-    id = 'S-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7);
-    localStorage.setItem(KEY, id);
-  }
+const SESSION_KEY = '루마네_세션ID';
+function generateSessionId() {
+  const id = 'S-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7);
+  localStorage.setItem(SESSION_KEY, id);
   return id;
+}
+let SESSION_ID = (() => {
+  const id = localStorage.getItem(SESSION_KEY);
+  return (id && /^S-\d{13}-[a-z0-9]{5}$/.test(id)) ? id : generateSessionId();
 })();
 
 /* ── 테스트 모드: URL에 ?test=1 파라미터가 있으면 활성화 ── */
 const IS_TEST = new URLSearchParams(window.location.search).get('test') === '1';
 
-/* ── 닉네임: localStorage에 저장 (랜덤 생성) ── */
+/* ── 유입 소스: URL ?src=... &src2=... → localStorage 보관 (재방문 시 같은 소스 유지) ── */
+const SRC_KEY = '루마네_유입소스';
+let _src = '', _src2 = '';
+try {
+  const _qs = new URLSearchParams(window.location.search);
+  const _qSrc  = (_qs.get('src')  || '').trim().slice(0, 50);
+  const _qSrc2 = (_qs.get('src2') || '').trim().slice(0, 50);
+  if (_qSrc || _qSrc2) {
+    _src = _qSrc; _src2 = _qSrc2;
+    localStorage.setItem(SRC_KEY, JSON.stringify({ src: _src, src2: _src2 }));
+  } else {
+    const stored = JSON.parse(localStorage.getItem(SRC_KEY) || '{}');
+    _src = stored.src || ''; _src2 = stored.src2 || '';
+  }
+} catch { /* ignore */ }
+const SRC = _src, SRC2 = _src2;
+
+/* ── 닉네임: localStorage에 저장 ── */
 const NICKNAME_KEY = '루마네_닉네임';
 const _NICK_COLORS  = ['빨간','주황','노란','초록','파란','보라','분홍','하늘','민트','금빛'];
 const _NICK_ANIMALS = ['토끼','곰','고양이','강아지','여우','판다','코알라','사슴','너구리','햄스터'];
 function _generateNickname() {
   const c = _NICK_COLORS[Math.floor(Math.random() * _NICK_COLORS.length)];
   const a = _NICK_ANIMALS[Math.floor(Math.random() * _NICK_ANIMALS.length)];
-  const id = c + a;
+  // SESSION_ID 끝 3자리(영숫자) 붙여서 충돌 방지 — 예: "민트너구리-3kx"
+  const suffix = (SESSION_ID || '').slice(-3);
+  const id = c + a + (suffix ? '-' + suffix : '');
   localStorage.setItem(NICKNAME_KEY, id);
   return id;
 }
 let userNickname = localStorage.getItem(NICKNAME_KEY) || '';
+// 마이그레이션: 기존 suffix 없는 자동 닉네임("민트너구리" 형식)은 충돌 방지 위해 재생성
+if (userNickname && !/-[a-z0-9]{3}$/.test(userNickname)) {
+  const matchesAuto = _NICK_COLORS.some(c => _NICK_ANIMALS.some(a => userNickname === c + a));
+  if (matchesAuto) userNickname = _generateNickname();
+}
 import { todayStr, esc } from './utils.js';
 import {
   initUI, setLoading, getIsLoading,
@@ -143,8 +168,7 @@ async function checkServer() {
   } else {
     setStatusText('데모 모드');
     setBanner('warn',
-      '⚠️ 서버 미연결 — 데모 모드로 동작 중입니다. ' +
-      'server 폴더에서 npm start 실행 후 새로고침하세요.');
+      '⚠️ 현재 서버에 연결되지 않아 데모 모드로 동작 중입니다. 잠시 후 새로고침해 주세요.');
   }
 }
 
@@ -179,7 +203,7 @@ async function registerSessionWithHistory() {
     await fetch(`${SERVER}/api/session/register`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sessionId: SESSION_ID, nickname: userNickname, isTest: IS_TEST }),
+      body: JSON.stringify({ sessionId: SESSION_ID, nickname: userNickname, isTest: IS_TEST, src: SRC, src2: SRC2 }),
     });
     // 히스토리가 있으면 /api/chat으로 동기화 (빈 응답 OK)
     if (history.length > 0) {
@@ -200,7 +224,7 @@ async function registerSession() {
     await fetch(`${SERVER}/api/session/register`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sessionId: SESSION_ID, nickname: userNickname, isTest: IS_TEST }),
+      body: JSON.stringify({ sessionId: SESSION_ID, nickname: userNickname, isTest: IS_TEST, src: SRC, src2: SRC2 }),
     });
   } catch { /* 무시 */ }
 }
@@ -589,7 +613,6 @@ function greet() {
       setLoading(false);
     })
     .catch(() => {
-      serverOnline = false;
       demoGreet();
     });
   } else {
@@ -614,6 +637,7 @@ function demoGreet() {
 ================================================================ */
 export function newChat() {
   archiveCurrent();
+  SESSION_ID     = generateSessionId();
   history        = [];
   demoIdx        = 0;
   pendingConfirm = false;
@@ -709,7 +733,9 @@ document.addEventListener('DOMContentLoaded', () => {
   window.newChat            = newChat;
   window.closeQuote         = closeQuote;
   window.printQuote         = printQuote;
-
+  window.showTranscript     = showTranscript;
+  window.continueFromHistory = continueFromHistory;
+  window.closeTranscript    = closeTranscript;
   window.toggleSearch       = toggleSearch;
   window.closeSearch        = closeSearch;
 
@@ -762,7 +788,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   nicknameInput.addEventListener('input', () => { nicknameError.textContent = ''; });
 
-  // 닉네임 입력 생략 — 없으면 랜덤 생성
+  // 닉네임 없으면 랜덤 자동 생성
   if (!userNickname) userNickname = _generateNickname();
   nicknameOverlay.classList.add('hidden');
   startChat();
@@ -853,6 +879,9 @@ async function startChat() {
   startUpdateChecker();
 }
 
+/* ================================================================
+   이전 상담 이력 조회 (Supabase, 연락처 기반)
+================================================================ */
 /* ================================================================
    배포 자동감지 (30초마다 /api/version 체크)
 ================================================================ */

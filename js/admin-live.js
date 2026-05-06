@@ -52,6 +52,48 @@ function clearUnreadFilter() {
 }
 window.clearUnreadFilter = clearUnreadFilter;
 
+/* ── 유입 소스 통계 로드/렌더링 ── */
+async function loadSourceStats(period = 'today') {
+  // 기간 버튼 활성화 토글
+  document.querySelectorAll('#srcPeriodBtns button').forEach(b => {
+    const active = b.dataset.period === period;
+    b.style.background = active ? '#7c3aed' : '#fff';
+    b.style.color      = active ? '#fff' : '#374151';
+    b.style.borderColor = active ? '#7c3aed' : '#d1d5db';
+  });
+  const listEl = document.getElementById('sourceStatsList');
+  if (!listEl) return;
+  listEl.textContent = '로딩 중…';
+  try {
+    const res = await fetch(`${SERVER}/api/admin/source-stats?period=${encodeURIComponent(period)}`, { headers: adminHeaders() });
+    if (!res.ok) throw new Error(res.status);
+    const data = await res.json();
+    if (!data.counts || data.counts.length === 0) {
+      listEl.innerHTML = '<div style="color:#9ca3af;font-size:13px;">데이터 없음</div>';
+      return;
+    }
+    const total = data.total || 0;
+    listEl.innerHTML = `
+      <div style="font-size:12px;color:#9ca3af;margin-bottom:8px;">총 방문 ${total}건</div>
+      <div style="display:flex;flex-direction:column;gap:6px;">
+        ${data.counts.map(({ src, count }) => {
+          const pct = total > 0 ? Math.round((count / total) * 100) : 0;
+          return `
+            <div style="display:flex;align-items:center;gap:8px;">
+              <div style="min-width:80px;font-size:13px;font-weight:600;color:#111827;">${escAdmin(src)}</div>
+              <div style="flex:1;height:8px;background:#f3f4f6;border-radius:4px;overflow:hidden;">
+                <div style="height:100%;background:#7c3aed;width:${pct}%;"></div>
+              </div>
+              <div style="min-width:60px;text-align:right;font-size:12px;color:#374151;">${count}명 (${pct}%)</div>
+            </div>`;
+        }).join('')}
+      </div>`;
+  } catch (err) {
+    listEl.innerHTML = `<div style="color:#dc2626;font-size:12px;">로드 실패: ${escAdmin(err.message)}</div>`;
+  }
+}
+window.loadSourceStats = loadSourceStats;
+
 /* ── 대시보드에서 저장 상담 삭제 ── */
 async function deleteSavedConvFromDash(id, ev) {
   if (ev) { ev.stopPropagation(); ev.preventDefault(); }
@@ -799,8 +841,8 @@ function renderDashboardSessions(sessions) {
               <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap;">
                 <span style="font-size:15px;font-weight:${isNew?'700':'600'};color:#111827;">${escAdmin(getConvLabel(c))}</span>
                 ${c.layout ? `<span style="font-size:11px;padding:1px 6px;border-radius:6px;background:#ede9fe;color:#7c3aed;font-weight:600;">${escAdmin(c.layout)}</span>` : ''}
-                ${isNew ? '<span style="font-size:10px;padding:1px 5px;border-radius:6px;background:#ef4444;color:#fff;font-weight:700;">NEW</span>' : ''}
                 ${c.is_test ? '<span style="font-size:10px;padding:1px 5px;border-radius:6px;background:#fef3c7;color:#92400e;font-weight:700;">테스트</span>' : ''}
+                ${isNew ? '<span style="font-size:10px;padding:1px 5px;border-radius:6px;background:#ef4444;color:#fff;font-weight:700;">NEW</span>' : ''}
               </div>
               <div style="font-size:11px;color:#9ca3af;margin-top:1px;">${timeStr} · 💬 ${c.message_count||0}개</div>
             </div>
