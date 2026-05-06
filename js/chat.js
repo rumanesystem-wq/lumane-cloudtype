@@ -484,9 +484,9 @@ async function send(prefilledText) {
       const exShape = parts[0] || '';
       const exUnits = parts[1] || '';
       const exOpts  = parts[2] || '';
-      // 같은 형태(shape) 예시는 세션당 한 번만 표시
-      const alreadyShown = history.some(m => m.role === 'image' && m.label === `📐 ${exShape} 예시`);
-      if (!alreadyShown) {
+      // 같은 형태(shape) 예시는 세션당 최대 3개까지 표시
+      const shownCount = history.filter(m => m.role === 'image' && m.label === `📐 ${exShape} 예시`).length;
+      if (shownCount < 3) {
         fetch(`${SERVER}/api/find-example?shape=${encodeURIComponent(exShape)}&units=${encodeURIComponent(exUnits)}&options=${encodeURIComponent(exOpts)}`)
           .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
           .then(d => {
