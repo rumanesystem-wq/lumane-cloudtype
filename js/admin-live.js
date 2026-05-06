@@ -196,7 +196,11 @@ function renderLiveSessionList(sessions) {
   const container  = document.getElementById('liveSessionList');
   const dot        = document.getElementById('liveDot');
   const countEl    = document.getElementById('liveCount');
-  const savedConvs = (_cachedConversations || []).slice(0, 50);
+  // 활성 라이브 세션과 같은 session_id의 저장 상담은 중복 표시 방지
+  const activeLiveSessionIds = new Set(sessions.filter(s => s.id).map(s => String(s.id)));
+  const savedConvs = (_cachedConversations || [])
+    .filter(c => !activeLiveSessionIds.has(String(c.session_id)))
+    .slice(0, 50);
   const totalCount = sessions.length + savedConvs.length;
 
   if (dot) dot.style.background = sessions.length > 0 ? '#22c55e' : '#d1d5db';
@@ -437,7 +441,9 @@ function _refreshDashBadge() {
     const lastSeen = _seenMsgCounts[String(s.id)];
     return lastSeen !== undefined && (s.messageCount ?? 0) > lastSeen;
   }).length;
-  const convNew = _cachedConversations.filter(c => c.id && !seen.has(String(c.id))).length;
+  // 활성 라이브 세션과 같은 session_id의 저장 상담은 중복 카운트 방지
+  const activeLive = new Set(_cachedLiveSessions.filter(s => s.id).map(s => String(s.id)));
+  const convNew = _cachedConversations.filter(c => c.id && !seen.has(String(c.id)) && !activeLive.has(String(c.session_id))).length;
   const total   = liveNew + convNew;
   [document.getElementById('dashNewBadge'), document.getElementById('sidebarDashBadge')].forEach(badge => {
     if (!badge) return;
