@@ -40,10 +40,17 @@ async function checkHistoryCount() {
 
 function goToUnreadHistory() {
   switchTab('dashboard');
+  _unreadOnlyMode = true; // 항상 ON 고정. 끄기는 배너 [전체 보기] 버튼으로만.
+  renderDashboardSessions(_cachedLiveSessions);
   setTimeout(() => {
     document.getElementById('dashboardSessionList')?.scrollIntoView({ behavior: 'smooth' });
   }, 100);
 }
+function clearUnreadFilter() {
+  _unreadOnlyMode = false;
+  renderDashboardSessions(_cachedLiveSessions);
+}
+window.clearUnreadFilter = clearUnreadFilter;
 
 /**
  * 백그라운드 세션 카운트 폴링 (항상 실행, 5초마다)
@@ -352,6 +359,10 @@ function markSessionSeen(sessionId) {
   const id = String(sessionId);
   if (_seenMsgCounts[id] === undefined) _saveSeenCount(id, 0);
   _refreshDashBadge();
+  // 미확인만 보기 필터 활성 시, 읽음 처리된 카드 즉시 사라지도록 재렌더링
+  if (_unreadOnlyMode) {
+    setTimeout(() => renderDashboardSessions(_cachedLiveSessions), 0);
+  }
   // 실시간 세션 카드 즉시 업데이트
   const sessionCard = document.querySelector(`[data-session-id="${CSS.escape(sessionId)}"]`);
   if (sessionCard) {
@@ -394,6 +405,7 @@ function _formatSizeRaw(raw) {
 let _cachedConversations  = [];
 let _cachedLiveSessions   = [];
 let _selectedSavedConvId  = null; // 완료 대화 선택 추적
+let _unreadOnlyMode       = false; // 미확인만 보기 필터
 
 function _refreshDashBadge() {
   const seen    = _getSeenSessions();
@@ -635,9 +647,42 @@ function renderDashboardSessions(sessions) {
     sortTime: (() => { const t = new Date(c.saved_at).getTime(); return isNaN(t) ? 0 : t; })(),
     data: c
   }));
-  const allItems = [...liveItems, ...convItems].sort((a, b) => b.sortTime - a.sortTime);
+  let allItems = [...liveItems, ...convItems].sort((a, b) => b.sortTime - a.sortTime);
 
-  container.innerHTML = allItems.map(item => {
+  // 미확인만 보기 필터 적용
+  if (_unreadOnlyMode) {
+    allItems = allItems.filter(item => {
+      if (item.type === 'live') {
+        const s = item.data;
+        const sid = String(s.id);
+        const msgCount = s.messageCount ?? 0;
+        const isNew = !seenSessions.has(sid) || _resetSessions.has(sid);
+        const lastSeen = _seenMsgCounts[sid];
+        const hasNewMsg = !isNew && lastSeen !== undefined && msgCount > lastSeen;
+        return isNew || hasNewMsg;
+      }
+      return !seenSessions.has(String(item.id));
+    });
+  }
+
+  const filterBanner = _unreadOnlyMode
+    ? `<div style="display:flex;align-items:center;justify-content:space-between;background:#fff7ed;border:1px solid #fdba74;border-radius:10px;padding:10px 14px;margin-bottom:10px;">
+        <span style="font-size:13px;font-weight:600;color:#c2410c;">🔴 미확인만 보기 (${allItems.length}건)</span>
+        <button onclick="clearUnreadFilter()" style="font-size:12px;padding:4px 10px;border:1px solid #fdba74;border-radius:6px;background:#fff;color:#c2410c;cursor:pointer;font-weight:600;">전체 보기</button>
+      </div>`
+    : '';
+
+  if (_unreadOnlyMode && allItems.length === 0) {
+    container.innerHTML = filterBanner + `
+      <div style="text-align:center;padding:60px 16px;color:#9ca3af;">
+        <div style="font-size:48px;margin-bottom:16px;">✅</div>
+        <div style="font-size:15px;font-weight:600;margin-bottom:6px;">미확인 상담이 없습니다</div>
+        <div style="font-size:13px;">모두 확인했습니다.</div>
+      </div>`;
+    return;
+  }
+
+  container.innerHTML = filterBanner + allItems.map(item => {
     if (item.type === 'live') {
       const s        = item.data;
       const isAdmin  = s.mode === 'admin';
