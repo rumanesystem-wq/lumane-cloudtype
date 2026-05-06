@@ -898,7 +898,8 @@ window.selectSavedConvInPanel = function(convId) {
   _selectedSavedConvId = convId;
 
   // _saveSeenCount 먼저 호출 — markSessionSeen에서 0 저장 제거 후 호출자 책임
-  const conv = _cachedConversations.find(c => c.id === convId);
+  // String 변환 — c.id가 lumane schema에서 bigint(숫자)일 때 string convId와 매칭되도록
+  const conv = _cachedConversations.find(c => String(c.id) === String(convId));
   if (!conv) return;  // early return 먼저 — conv 없으면 이후 패널 렌더링 불가
   _saveSeenCount(String(convId), conv.message_count ?? 0);
   markSessionSeen(convId);
@@ -1241,9 +1242,6 @@ function renderLiveSummary(sess) {
   const body = document.getElementById('liveSummaryBody');
   body.innerHTML = `
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 12px;">
-      ${row('성함', f.이름, true)}
-      ${row('연락처', f.연락처, true)}
-      ${row('설치지역', f.설치지역, true)}
       ${row('공간사이즈', f.공간사이즈, true)}
       ${row('드레스룸형태', f.형태, true)}
       <div style="display:flex;gap:6px;align-items:baseline;padding:2px 0;">

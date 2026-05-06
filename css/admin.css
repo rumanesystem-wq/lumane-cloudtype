@@ -822,9 +822,9 @@ body {
 }
 
 /* =============================================
-   모바일 반응형 (768px 미만)
+   모바일 반응형 (900px 미만)
 ============================================= */
-@media (max-width: 767px) {
+@media (max-width: 900px) {
   /* 햄버거 표시 */
   .hamburger { display: flex; }
 
@@ -854,12 +854,11 @@ body {
   /* 섹션 패딩 최소화 */
   .section { padding: 8px; }
 
-  /* 통계 카드: 2열, 누적 상담은 전체 폭 */
-  .stats-grid { grid-template-columns: repeat(2, 1fr); gap: 8px; margin-bottom: 12px; }
+  /* 통계 카드: 모바일 패딩 축소 */
+  .stats-grid { gap: 8px; margin-bottom: 12px; }
   .stats-card { padding: 12px 14px; }
-  .stats-card--total { grid-column: span 2; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-  .stats-card--total .stats-label { font-size: 11px; margin-bottom: 0; }
-  .stats-card--total .stats-value { font-size: 26px; margin-bottom: 0; }
+  .stats-card--total .stats-label { font-size: 11px; margin-bottom: 4px; }
+  .stats-card--total .stats-value { font-size: 26px; margin-bottom: 4px; }
   .stats-card--total .stats-sub { font-size: 11px; }
   .stats-label { font-size: 11px; margin-bottom: 5px; }
   .stats-value { font-size: 24px; margin-bottom: 4px; }
@@ -988,15 +987,17 @@ body {
 ============================================= */
 .stats-grid {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   gap: 12px;
   margin-bottom: 24px;
+  align-items: start;
 }
 .stats-card {
   background: #fff;
   border: 1px solid #e5e7eb;
   border-radius: 14px;
   padding: 18px 20px;
+  min-width: 0;
 }
 .stats-card--total {
   background: #1a1a2e;
@@ -1010,6 +1011,7 @@ body {
   margin-bottom: 8px;
   text-transform: uppercase;
   letter-spacing: 0.03em;
+  word-break: keep-all;
 }
 .stats-card--total .stats-label { color: #9ca3af; }
 .stats-value {
@@ -1018,6 +1020,7 @@ body {
   color: #1a1a2e;
   line-height: 1;
   margin-bottom: 6px;
+  word-break: keep-all;
 }
 .stats-card--total .stats-value { color: #fff; }
 .stats-sub {
