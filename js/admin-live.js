@@ -439,6 +439,8 @@ let _selectedSavedConvId  = null; // 완료 대화 선택 추적
 let _unreadOnlyMode       = false; // 미확인만 보기 필터
 
 function _refreshDashBadge() {
+  // 책갈피(seen-counts) 로드 전에는 카운트 계산 보류 — 잘못된 미확인 표시 방지
+  if (!_seenCountsLoaded) return;
   const seen    = _getSeenSessions();
   const liveNew = _cachedLiveSessions.filter(s => {
     if (!s.id) return false;
