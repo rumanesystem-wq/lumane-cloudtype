@@ -228,7 +228,7 @@ async function fetchLiveSessions() {
     if (sessions.length > 0 && !liveSelectedId && !_selectedSavedConvId) {
       /* 아직 선택된 세션 없고 저장 상담도 안 보고 있으면 가장 최근 세션 자동 선택 */
       selectLiveSession(sessions[0].id);
-    } else if (liveSelectedId && !sessions.find(s => s.id === liveSelectedId)) {
+    } else if (liveSelectedId && !sessions.find(s => String(s.id) === String(liveSelectedId))) {
       /* 선택했던 세션이 사라졌으면 다음 세션으로 전환 */
       liveSelectedId = null;
       if (sessions.length > 0) selectLiveSession(sessions[0].id);
@@ -279,9 +279,14 @@ function renderLiveSessionList(sessions) {
 
   // ── 진행 중인 세션 ──
   const liveHtml = sessions.map(s => {
-    const isSelected = s.id === liveSelectedId;
+    const isSelected = String(s.id) === String(liveSelectedId);
     const isAdmin    = s.mode === 'admin';
-    const isNew      = s.id && !seenNow.has(String(s.id));
+    const sid        = String(s.id);
+    const lastSeen   = _seenMsgCounts[sid];
+    const msgCount0  = s.messageCount ?? 0;
+    const isNewRaw   = s.id && !seenNow.has(sid);
+    const hasNewMsg  = !isNewRaw && lastSeen !== undefined && msgCount0 > lastSeen;
+    const isNew      = isNewRaw || hasNewMsg;
     const ago        = timeSince(new Date(s.lastMessageAt));
     const msgCount   = s.messageCount ?? 0;
     return `
@@ -314,7 +319,7 @@ function renderLiveSessionList(sessions) {
   // ── 이전 대화 (실시간 자동 기록됨) ──
   const savedSorted = [...savedConvs].sort((a, b) => new Date(b.saved_at) - new Date(a.saved_at));
   const savedHtml = savedSorted.map(c => {
-    const isSelected = _selectedSavedConvId === c.id;
+    const isSelected = String(_selectedSavedConvId) === String(c.id);
     const label      = getConvLabel(c);
     const timeStr    = c.saved_at ? timeSince(new Date(c.saved_at)) : '';
     const sub        = [c.region, c.layout, `💬 ${c.message_count || 0}개`].filter(Boolean).join(' · ');
@@ -599,9 +604,11 @@ function _checkConvNotifications() {
 function _checkLiveNotifications(sessions) {
   const adminSeen = _getSeenSessions();
   sessions.forEach(s => {
-    if (!s.id || _notifiedLiveIds.has(s.id)) return;
-    _notifiedLiveIds.add(s.id);
-    if (adminSeen.has(s.id)) return;
+    if (!s.id) return;
+    const sid = String(s.id);
+    if (_notifiedLiveIds.has(sid)) return;
+    _notifiedLiveIds.add(sid);
+    if (adminSeen.has(sid)) return;
     _addNotif('live_start', '새로운 고객님이 오셨습니다 🙋', s.customerName || '고객', s.id);
   });
   _liveNotifReady = true;
@@ -1017,8 +1024,8 @@ async function fetchLiveSessionMsgs() {
     if (!res.ok) return;
     const data = await res.json();
     // 실시간으로 열람 중인 세션은 항상 읽음 처리 (카톡처럼 보는 중에는 배지 안 뜸)
-    const sessData = _cachedLiveSessions.find(s => s.id === liveSelectedId);
-    if (sessData) _saveSeenCount(liveSelectedId, sessData.messageCount ?? 0);
+    const sessData = _cachedLiveSessions.find(s => String(s.id) === String(liveSelectedId));
+    if (sessData) _saveSeenCount(String(liveSelectedId), sessData.messageCount ?? 0);
     renderLiveChatPanel(data.session);
   } catch { /* 무시 */ }
 }
