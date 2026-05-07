@@ -136,6 +136,9 @@ function startBgPolling() {
   }
   bgPollTimer = setInterval(async () => {
 
+    // 백그라운드 탭에선 폴링 스킵 — 모바일 배터리·서버 부하 감소
+    if (typeof document !== 'undefined' && document.hidden) return;
+
     // ── 오프라인이면 재연결 시도 (Render.com 절전 복귀 대응) ──
     if (!serverOnline) {
       try {
@@ -212,6 +215,8 @@ function stopLivePolling() {
  */
 async function fetchLiveSessions() {
   if (!serverOnline) return;
+  // 백그라운드 탭에선 폴링 스킵
+  if (typeof document !== 'undefined' && document.hidden) return;
   try {
     const res = await fetch(`${SERVER}/api/admin/sessions`, { headers: adminHeaders() });
     if (!res.ok) return;
@@ -220,8 +225,8 @@ async function fetchLiveSessions() {
     renderLiveSessionList(sessions);
 
     /* ── 세션 자동 선택 ── */
-    if (sessions.length > 0 && !liveSelectedId) {
-      /* 아직 선택된 세션 없으면 가장 최근 세션 자동 선택 */
+    if (sessions.length > 0 && !liveSelectedId && !_selectedSavedConvId) {
+      /* 아직 선택된 세션 없고 저장 상담도 안 보고 있으면 가장 최근 세션 자동 선택 */
       selectLiveSession(sessions[0].id);
     } else if (liveSelectedId && !sessions.find(s => s.id === liveSelectedId)) {
       /* 선택했던 세션이 사라졌으면 다음 세션으로 전환 */
@@ -514,6 +519,7 @@ function _refreshDashBadge() {
 
 async function fetchDashboardConversations() {
   if (!serverOnline) return;
+  if (typeof document !== 'undefined' && document.hidden) return;
   try {
     const res = await fetch(`${SERVER}/api/admin/conversations`, { headers: adminHeaders() });
     if (!res.ok) return;
@@ -1002,6 +1008,7 @@ window.selectSavedConvInPanel = function(convId) {
  */
 async function fetchLiveSessionMsgs() {
   if (!liveSelectedId || !serverOnline) return;
+  if (typeof document !== 'undefined' && document.hidden) return;
   try {
     const res = await fetch(
       `${SERVER}/api/admin/session/${encodeURIComponent(liveSelectedId)}`,
@@ -1361,7 +1368,7 @@ function renderLiveChatPanel(sess) {
   const tk = (window._liveTokenMap || {})[sess.id];
   const tkStr = tk ? ` · 🪙 ₩${tk.costKRW.toLocaleString()} (${tk.totalTokens.toLocaleString()}토큰)` : '';
   document.getElementById('livePanelMeta').textContent =
-    `세션 ${sess.id.slice(0, 20)}… · 메시지 ${sess.messages.length}개${tkStr}`;
+    `세션 ${String(sess.id).slice(0, 20)}… · 메시지 ${sess.messages.length}개${tkStr}`;
 
   document.getElementById('livePanelActions').innerHTML = isAdmin
     ? `<button class="btn btn-outline" onclick="releaseSession()" style="font-size:13px;">🤖 AI에게 넘기기</button>`
@@ -1881,10 +1888,27 @@ function runAdminSearch(query) {
     if (!bubble) return;
     const text = bubble.textContent;
     if (!text.toLowerCase().includes(lq)) return;
-    bubble.innerHTML = bubble.innerHTML.replace(
-      new RegExp(escAdminReg(query), 'gi'),
-      m => `<mark class="admin-search-hl">${m}</mark>`
-    );
+    // TreeWalker로 텍스트 노드만 wrap — 링크 href·이미지 src 같은 속성값 깨짐 방지
+    const re = new RegExp(escAdminReg(query), 'gi');
+    const walker = document.createTreeWalker(bubble, NodeFilter.SHOW_TEXT);
+    const textNodes = [];
+    let n; while ((n = walker.nextNode())) textNodes.push(n);
+    textNodes.forEach(node => {
+      if (!re.test(node.nodeValue)) { re.lastIndex = 0; return; }
+      re.lastIndex = 0;
+      const frag = document.createDocumentFragment();
+      let last = 0, match;
+      while ((match = re.exec(node.nodeValue))) {
+        if (match.index > last) frag.appendChild(document.createTextNode(node.nodeValue.slice(last, match.index)));
+        const mark = document.createElement('mark');
+        mark.className = 'admin-search-hl';
+        mark.textContent = match[0];
+        frag.appendChild(mark);
+        last = match.index + match[0].length;
+      }
+      if (last < node.nodeValue.length) frag.appendChild(document.createTextNode(node.nodeValue.slice(last)));
+      node.parentNode.replaceChild(frag, node);
+    });
     bubble.querySelectorAll('.admin-search-hl').forEach(m => _adminSearchMatches.push(m));
   });
   updateAdminSearchCount(_adminSearchMatches.length > 0 ? 1 : 0, _adminSearchMatches.length);

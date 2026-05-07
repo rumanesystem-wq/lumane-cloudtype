@@ -15,6 +15,8 @@ const { Client: NotionClient } = require('@notionhq/client');
 const multer = require('multer');
 const fs   = require('fs');
 const path = require('path');
+const crypto = require('crypto');
+const dns = require('dns').promises;
 
 // ── Supabase 클라이언트 ───────────────────────────────────────
 const supabase = createClient(
@@ -86,8 +88,15 @@ function requireAdmin(req, res, next) {
   if (!ADMIN_TOKEN) {
     return res.status(403).json({ error: 'Admin 기능이 비활성화되어 있습니다.' });
   }
-  const auth = req.headers['authorization'];
-  if (auth !== `Bearer ${ADMIN_TOKEN}`) {
+  const auth = req.headers['authorization'] || '';
+  // 타이밍 공격 방지 — 길이 다르면 즉시 reject, 같으면 timingSafeEqual
+  const expected = `Bearer ${ADMIN_TOKEN}`;
+  if (auth.length !== expected.length) {
+    return res.status(401).json({ error: '인증이 필요합니다.' });
+  }
+  const a = Buffer.from(auth);
+  const b = Buffer.from(expected);
+  if (!crypto.timingSafeEqual(a, b)) {
     return res.status(401).json({ error: '인증이 필요합니다.' });
   }
   next();
@@ -233,9 +242,10 @@ function parseOrderSheet(text) {
   }
 
   return {
-    customer_name:   get(/고객명[:\s]+([^|\n]+)/) || get(/성함[:\s]+([^\n]+)/),
-    phone:           get(/전화[:\s]+([^|\n]+)/)   || get(/연락처[:\s]+([^\n]+)/),
-    region:          get(/주소[:\s]+([^|\n]+)/),
+    // 개인정보(이름·전화·주소) 자동 추출 비활성화 — 지침에 따라 견적서에 절대 안 들어감
+    customer_name:   null,
+    phone:           null,
+    region:          null,
     layout:          get(/설치\s*형태[:\s]+([^\n]+)/),
     frame_color:     frame_color || null,
     shelf_color:     shelf_color || null,
@@ -382,14 +392,31 @@ app.use((req, res, next) => {
 // ── favicon.ico — 404 방지 ──
 app.get('/favicon.ico', (req, res) => res.status(204).end());
 
-// ── 클린 URL (확장자 없이 접근) ──────────────────────────────
-app.get('/admin', (req, res) => res.sendFile(__dirname + '/admin.html'));
-app.get('/chat',  (req, res) => res.sendFile(__dirname + '/chat.html'));
-app.get('/quote', (req, res) => res.sendFile(__dirname + '/quote.html'));
-app.get('/blog',  (req, res) => res.sendFile(__dirname + '/blog.html'));
+// ── 공개 HTML 파일 (확장자 유무 둘 다 지원) ──────────────────
+const _noCacheHtml = (res) => {
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+};
+const _serveHtml = (file) => (req, res) => {
+  _noCacheHtml(res);
+  res.sendFile(__dirname + '/' + file);
+};
+app.get('/',           _serveHtml('index.html'));
+app.get('/index.html', _serveHtml('index.html'));
+app.get('/admin',      _serveHtml('admin.html'));
+app.get('/admin.html', _serveHtml('admin.html'));
+app.get('/chat',       _serveHtml('chat.html'));
+app.get('/chat.html',  _serveHtml('chat.html'));
+app.get('/quote',      _serveHtml('quote.html'));
+app.get('/quote.html', _serveHtml('quote.html'));
+app.get('/blog',       _serveHtml('blog.html'));
+app.get('/blog.html',  _serveHtml('blog.html'));
 
-// ── 정적 파일 제공 — HTML/JS/CSS는 캐시 안 함 (항상 최신 버전) ──
-app.use(express.static(__dirname, {
+// ── 정적 자산 화이트리스트 (보안: 루트 전체 노출 차단) ──────
+// 외부 공개 가능한 정적 폴더만 명시적으로 허용.
+// 비공개: 지침/, 백업본/, scripts/, 작업일지/, 운영메모/, server.js 등
+const _staticOpts = {
   setHeaders(res, filePath) {
     if (/\.(html|js|css)$/.test(filePath)) {
       res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
@@ -397,7 +424,12 @@ app.use(express.static(__dirname, {
       res.setHeader('Expires', '0');
     }
   }
-}));
+};
+app.use('/css',          express.static(path.join(__dirname, 'css'),          _staticOpts));
+app.use('/js',           express.static(path.join(__dirname, 'js'),           _staticOpts));
+app.use('/images',       express.static(path.join(__dirname, 'images'),       _staticOpts));
+app.use('/preview_site', express.static(path.join(__dirname, 'preview_site'), _staticOpts));
+app.get('/floorplan_preview.html', _serveHtml('floorplan_preview.html'));
 
 // ── 헬스 체크 ─────────────────────────────────────────────────
 app.get('/api/health', (req, res) => {
@@ -467,13 +499,45 @@ app.post('/api/upload', uploadMw.single('file'), async (req, res) => {
 });
 
 // ── OG 링크 미리보기 API ─────────────────────────────────────
+// SSRF 방어: 호스트네임을 실제 IP로 해석 후 사설/loopback 대역 차단
+function _isPrivateIp(ip) {
+  if (!ip) return true;
+  // IPv4 사설/loopback/링크로컬
+  if (/^127\./.test(ip)) return true;
+  if (/^10\./.test(ip)) return true;
+  if (/^192\.168\./.test(ip)) return true;
+  if (/^172\.(1[6-9]|2\d|3[01])\./.test(ip)) return true;
+  if (/^169\.254\./.test(ip)) return true;
+  if (/^0\./.test(ip)) return true;
+  // IPv6 loopback / 링크로컬 / unique-local
+  if (ip === '::1' || ip === '::') return true;
+  if (/^fe80:/i.test(ip)) return true;
+  if (/^fc[0-9a-f]{2}:/i.test(ip) || /^fd[0-9a-f]{2}:/i.test(ip)) return true;
+  return false;
+}
+async function _safeUrlOrThrow(url) {
+  const u = new URL(url);
+  const lookups = await dns.lookup(u.hostname, { all: true });
+  for (const { address } of lookups) {
+    if (_isPrivateIp(address)) throw new Error('내부 IP 차단');
+  }
+  return u;
+}
+
 app.get('/api/og', async (req, res) => {
   const { url } = req.query;
   if (!url || !/^https?:\/\//i.test(url)) {
     return res.status(400).json({ error: 'url 파라미터가 필요합니다' });
   }
+  // 정규식 1차 차단 (8진수·hex 등 우회 방지를 위해 dns 검증도 함께)
   const BLOCKED_IP = /^https?:\/\/(localhost|127\.|0\.0\.0\.|10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|::1|169\.254\.)/i;
   if (BLOCKED_IP.test(url)) {
+    return res.status(400).json({ error: '허용되지 않는 URL입니다' });
+  }
+  // dns 기반 IP 검증 (8진수·10진수·DNS 리바인딩 방어)
+  try {
+    await _safeUrlOrThrow(url);
+  } catch {
     return res.status(400).json({ error: '허용되지 않는 URL입니다' });
   }
 
@@ -502,7 +566,11 @@ app.get('/api/og', async (req, res) => {
     const resp = await fetch(url, {
       headers: { 'User-Agent': 'Mozilla/5.0 (compatible; LumaneBot/1.0)' },
       signal:  AbortSignal.timeout(5000),
+      redirect: 'manual', // SSRF 방어: 자동 리다이렉트로 내부 IP 우회 차단
     });
+    if (resp.status >= 300 && resp.status < 400) {
+      return res.status(400).json({ error: '리다이렉트 차단됨' });
+    }
     const html = await resp.text();
 
     // HTML 엔티티 디코딩 (&amp; → & 등)
@@ -822,7 +890,9 @@ app.post('/api/chat', chatRateLimit, async (req, res) => {
       // AI 응답에서 "OO 고객님" 패턴으로 이름 추출 — 임시 이름인 경우만 업데이트
       if (sess.customerNameIsTemp) {
         const nameMatch = reply.match(/([가-힣]{2,5})\s*고객님/);
-        if (nameMatch) {
+        // 흔한 어미·감탄사·조사 블랙리스트 (이름이 아님)
+        const _NOT_NAME = new Set(['네','예','응','아','오','음','어','네네','그래','그리고','감사','죄송','반갑','맞아','맞습','괜찮','알겠']);
+        if (nameMatch && !_NOT_NAME.has(nameMatch[1])) {
           sess.customerName = nameMatch[1];
           sess.customerNameIsTemp = false;
         }
@@ -1207,11 +1277,16 @@ app.post('/api/admin/release', (req, res) => {
 app.post('/api/admin/message', (req, res) => {
   const { sessionId, message } = req.body;
   if (!sessionId || !message) return res.status(400).json({ error: 'sessionId, message 필요' });
+  // 입력 검증 — 문자열 + 길이 제한
+  if (typeof message !== 'string') {
+    return res.status(400).json({ error: 'message는 문자열이어야 합니다' });
+  }
+  const trimmed = message.slice(0, 2000);
 
   const sess = sessions.get(sessionId);
   if (!sess) return res.status(404).json({ error: '세션 없음' });
 
-  const msg = { role: 'assistant', content: message, fromAdmin: true, time: new Date().toISOString() };
+  const msg = { role: 'assistant', content: trimmed, fromAdmin: true, time: new Date().toISOString() };
   sess.pendingAdminMsgs.push(msg);
   sess.messages.push(msg);
   sess.lastActivity = new Date();
@@ -1263,7 +1338,10 @@ app.post('/api/admin/conversations/:id/resend-notion', async (req, res) => {
       .eq('id', req.params.id)
       .single();
     if (error) throw error;
-    const MAKE_WEBHOOK = 'https://hook.eu1.make.com/xalfs9y2jj2doxoikl3se5j3j3jve8f0';
+    const MAKE_WEBHOOK = process.env.MAKE_WEBHOOK_URL || 'https://hook.eu1.make.com/xalfs9y2jj2doxoikl3se5j3j3jve8f0';
+    if (!process.env.MAKE_WEBHOOK_URL) {
+      console.warn('⚠️ MAKE_WEBHOOK_URL 환경변수 미설정 — 코드에 박힌 기본값 사용 중. .env에 추가 권장.');
+    }
     const msgs = Array.isArray(c.messages) ? c.messages : [];
     const conversation = msgs.map(m =>
       `${m.role === 'user' ? '고객' : '루마네'}: ${(m.content || '').replace(/"/g, "'").replace(/\\/g, '').replace(/[\r\n\t]/g, ' ')}`
@@ -1513,94 +1591,10 @@ app.get('/api/quotes', async (_req, res) => {
   }
 });
 
-app.post('/api/quote', async (req, res) => {
-  try {
-    const {
-      name, phone, region,
-      width, depth, height,
-      layout_type, options,
-      frame_color, shelf_color,
-      request_memo, has_photo, file_name,
-    } = req.body;
-
-    const quoteNumber = 'KB-' + new Date().toISOString().slice(0,10).replace(/-/g,'') + '-' + String(Date.now()).slice(-4);
-
-    const { data, error } = await supabase
-      .from('quotes')
-      .insert([{
-        quote_number: quoteNumber,
-        name:          name || '',
-        phone:         phone || '',
-        region:        region || '',
-        width:         parseFloat(width) || 0,
-        depth:         parseFloat(depth) || 0,
-        height:        parseFloat(height) || 0,
-        layout_type:   layout_type || '',
-        options:       Array.isArray(options) ? options : [],
-        frame_color:   frame_color || '',
-        shelf_color:   shelf_color || '',
-        request_memo:  request_memo || '',
-        privacy_agreed: true,
-        has_photo:     has_photo || '',
-        file_name:     file_name || '',
-        status:        '접수',
-      }])
-      .select('id')
-      .single();
-
-    if (error) throw error;
-    console.log(`✅ 견적 접수됨: ${quoteNumber} (ID: ${data.id})`);
-    res.json({ success: true, id: data.id, quote_number: quoteNumber });
-  } catch (err) {
-    console.error('❌ 견적 저장 오류:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ── 대화 저장 API ─────────────────────────────────────────────
-// chat.html에서 대화 종료 시 전체 메시지를 Supabase에 저장
-app.post('/api/save-conversation', async (req, res) => {
-  const { messages } = req.body;
-
-  if (!messages || !Array.isArray(messages) || messages.length === 0) {
-    return res.status(400).json({ error: 'messages 배열이 필요합니다.' });
-  }
-
-  try {
-    const { data, error } = await supabase
-      .from('conversations')
-      .insert([{ messages }])
-      .select()
-      .single();
-
-    if (error) throw error;
-
-    console.log(`✅ 대화 저장됨: ID ${data.id} (${messages.length}개 메시지)`);
-    res.json({ success: true, id: data.id });
-
-  } catch (err) {
-    console.error('❌ 대화 저장 오류:', err.message);
-    res.status(500).json({ error: '저장 중 오류가 발생했습니다.' });
-  }
-});
-
-// ── 대화 목록 조회 API ─────────────────────────────────────────
-app.get('/api/conversations', async (req, res) => {
-  try {
-    const { data, error } = await supabase
-      .from('conversations')
-      .select('*')
-      .order('created_at', { ascending: false });
-
-    if (error) throw error;
-
-    res.json({ success: true, conversations: data });
-
-  } catch (err) {
-    console.error('❌ 대화 조회 오류:', err.message);
-    res.status(500).json({ error: '조회 중 오류가 발생했습니다.' });
-  }
-});
+// ── 삭제됨 (보안): /api/quote POST, /api/save-conversation POST, /api/conversations GET
+// 사용처 없는 죽은 라우트 + 인증 부재로 인한 PII 노출 위험 → 일괄 제거.
+// AI 자동 견적 등록은 autoRegisterQuote() 내부 함수로 처리 (별도 라우트 불필요).
+// 어드민용은 /api/admin/conversations, /api/admin/quotes 사용.
 
 // ── 상담 요약 저장 API ─────────────────────────────────────────
 // chat.html에서 "상담 저장" 버튼 클릭 시 호출
