@@ -22,6 +22,14 @@ let _liveNotifReady       = false;
 let _convNotifReady       = false;
 let _unreadOnlyMode       = false;
 let _notifSeq             = 0;
+let _typingTimer          = null;
+let _adminReplyContent    = null;
+let _adminCtxMenu         = null;
+let _adminSearchMatches   = [];
+let _adminSearchIdx       = -1;
+let _adminSearchOpen      = false;
+let adminPendingFile      = null;
+let adminPendingObjectUrl = null;
 
 /**
  * 읽음 카운트 적재 완료 플래그 갱신
@@ -90,4 +98,63 @@ function setUnreadOnlyMode(v) {
  */
 function incNotifSeq() {
   return _notifSeq++;
+}
+
+/**
+ * 타이핑 상태 전송 디바운스 타이머
+ */
+function setTypingTimer(t) {
+  _typingTimer = t;
+}
+
+/**
+ * 어드민 답장 바 컨텍스트 (답장 대상 메시지 본문)
+ */
+function setAdminReplyContent(content) {
+  _adminReplyContent = content;
+}
+
+/**
+ * 어드민 메시지 우클릭 컨텍스트 메뉴 DOM 참조
+ */
+function setAdminCtxMenu(menu) {
+  _adminCtxMenu = menu;
+}
+
+/**
+ * 어드민 검색: 매치된 노드 배열 (재할당용 setter)
+ * 배열 내부 변경(push/splice 등)은 직접 _adminSearchMatches 사용 가능
+ */
+function setAdminSearchMatches(arr) {
+  _adminSearchMatches = Array.isArray(arr) ? arr : [];
+}
+
+/**
+ * 어드민 검색: 현재 매치 인덱스 (-1 = 매치 없음/리셋)
+ */
+function setAdminSearchIdx(idx) {
+  _adminSearchIdx = Number.isFinite(idx) ? idx : -1;
+}
+
+/**
+ * 어드민 검색 바 열림 상태
+ */
+function setAdminSearchOpen(v) {
+  _adminSearchOpen = !!v;
+}
+
+/**
+ * 어드민 첨부 파일 (보낼 예정인 File 객체, null = 첨부 없음)
+ * lifecycle: setAdminPendingObjectUrl과 짝으로 다뤄야 함 (URL.createObjectURL/revokeObjectURL)
+ */
+function setAdminPendingFile(file) {
+  adminPendingFile = file;
+}
+
+/**
+ * 어드민 첨부 파일 미리보기 URL (URL.createObjectURL 결과, null = 미리보기 해제)
+ * 호출자 책임: 새 URL 설정 전에 옛 URL을 revokeObjectURL로 해제
+ */
+function setAdminPendingObjectUrl(url) {
+  adminPendingObjectUrl = url;
 }
