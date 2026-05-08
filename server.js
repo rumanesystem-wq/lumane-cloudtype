@@ -8,7 +8,7 @@ require('dotenv').config(); // .env 파일 로드
 
 const express   = require('express');
 const cors      = require('cors');
-const rateLimit = require('express-rate-limit');
+const { rateLimit, ipKeyGenerator } = require('express-rate-limit');
 const Anthropic = require('@anthropic-ai/sdk');
 const { createClient } = require('@supabase/supabase-js');
 const { Client: NotionClient } = require('@notionhq/client');
@@ -70,7 +70,7 @@ app.use(express.json());
 const chatRateLimit = rateLimit({
   windowMs: 60 * 1000,   // 1분
   max: 10,               // 최대 10회
-  keyGenerator: (req) => req.ip,
+  keyGenerator: ipKeyGenerator,
   handler: (req, res) => {
     console.warn(`🚫 Rate limit 초과: ${req.ip}`);
     res.status(429).json({
@@ -314,11 +314,13 @@ async function upsertConversation(sess) {
       message_count:   sess.messages.length,
       started_at:      sess.startedAt,
       messages:        sess.messages,
+      src:             sess.src || null,
+      src2:            sess.src2 || null,
     };
 
     await supabase.from(table).upsert(payload, { onConflict: 'session_id' });
   } catch (err) {
-    console.error('실시간 저장 오류:', err.message);
+    console.error(`[FAIL_UPSERT] session=${sess.id} msgCount=${sess.messages.length} err=${err.message}`);
   }
 }
 
@@ -823,8 +825,8 @@ app.post('/api/chat', chatRateLimit, async (req, res) => {
         }
       }
       upsertConversation(sess).catch(e => {
-        console.error('syncOnly 저장 실패:', e.message);
-        setTimeout(() => upsertConversation(sess).catch(e2 => console.error('syncOnly 재시도 실패:', e2.message)), 2000);
+        console.error(`[FAIL_SYNC_1] session=${sess.id} err=${e.message}`);
+        setTimeout(() => upsertConversation(sess).catch(e2 => console.error(`[FAIL_SYNC_2] session=${sess.id} err=${e2.message}`)), 2000);
       });
       return res.json({ ok: true, synced: messages.length });
     }
@@ -901,8 +903,8 @@ app.post('/api/chat', chatRateLimit, async (req, res) => {
       }
 
       upsertConversation(sess).catch(e => {
-        console.error('실시간 저장 실패:', e.message);
-        setTimeout(() => upsertConversation(sess).catch(e2 => console.error('실시간 저장 재시도 실패:', e2.message)), 2000);
+        console.error(`[FAIL_AI_SAVE_1] session=${sess.id} err=${e.message}`);
+        setTimeout(() => upsertConversation(sess).catch(e2 => console.error(`[FAIL_AI_SAVE_2] session=${sess.id} err=${e2.message}`)), 2000);
       });
       autoRegisterQuote(sess, reply).catch(e => console.error('견적 자동 등록 실패:', e.message));
     }
@@ -1024,6 +1026,9 @@ app.get('/api/admin/sessions', async (_req, res) => {
   const list = [];
   const sessionIds = [];
   for (const [id, sess] of sessions) {
+    // 고객이 메시지를 한 번도 안 보낸 세션은 어드민 목록에서 제외
+    const userMsgCount = sess.messages.filter(m => m.role === 'user').length;
+    if (userMsgCount === 0) continue;
     list.push({
       id,
       mode: sess.mode,
@@ -1035,6 +1040,8 @@ app.get('/api/admin/sessions', async (_req, res) => {
       isTest: sess.isTest || false,
       isReturning: sess.isReturning || false,
       nickname: sess.nickname || null,
+      src: sess.src || null,
+      src2: sess.src2 || null,
     });
     sessionIds.push(id);
   }
@@ -1554,8 +1561,68 @@ app.post('/api/admin/seen-counts', async (req, res) => {
   }
 });
 
-// ── 견적 목록 API (임시: 메모리 세션에서 접수 완료된 항목 반환) ──
-app.get('/api/quotes', async (_req, res) => {
+// ── 견적 폼 제출 API (고객용 — 무인증, rate limit + 입력 검증) ─────
+// index.html, quote.html의 견적 신청 폼에서 호출
+app.post('/api/quote', chatRateLimit, async (req, res) => {
+  try {
+    const b = req.body || {};
+
+    // 필수: 개인정보 동의
+    if (b.privacy_agreed !== true) {
+      return res.status(400).json({ error: '개인정보 수집·이용 동의가 필요합니다' });
+    }
+
+    // 입력 화이트리스트 + 길이 제한
+    const str = (v, max = 200) => (typeof v === 'string' ? v.slice(0, max) : '');
+    const num = (v, max = 2000) => {
+      const n = parseFloat(v);
+      if (!Number.isFinite(n) || n < 0) return 0;
+      return Math.min(n, max);
+    };
+
+    // 전화번호 기본 형식 검증 (숫자·하이픈·공백·괄호·+ 만 허용, 5~30자)
+    const phoneRaw = str(b.phone, 30);
+    if (phoneRaw && !/^[0-9+\-\s()]{5,30}$/.test(phoneRaw)) {
+      return res.status(400).json({ error: '전화번호 형식이 올바르지 않습니다' });
+    }
+
+    const payload = {
+      quote_number:   'KB-' + new Date().toISOString().slice(0,10).replace(/-/g,'') + '-' + crypto.randomBytes(3).toString('hex').toUpperCase(),
+      name:           str(b.name, 50),
+      phone:          phoneRaw,
+      region:         str(b.region, 200),
+      width:          num(b.width),
+      depth:          num(b.depth),
+      height:         num(b.height),
+      layout_type:    str(b.layout_type, 100),
+      options:        Array.isArray(b.options) ? b.options.slice(0, 50).map(o => String(o).slice(0, 100)) : [],
+      frame_color:    str(b.frame_color, 50),
+      shelf_color:    str(b.shelf_color, 100),
+      request_memo:   str(b.request_memo, 2000),
+      privacy_agreed: true,
+      status:         '접수',
+      source:         '폼제출',
+      file_name:      str(b.file_name, 200),
+      has_photo:      str(b.has_photo, 20),
+    };
+
+    const { data, error } = await supabase
+      .from('quotes')
+      .insert([payload])
+      .select()
+      .single();
+    if (error) throw error;
+
+    console.log(`✅ 견적 폼 접수: ${payload.quote_number} (${payload.name})`);
+    res.json({ ok: true, quote_number: payload.quote_number, id: data?.id });
+  } catch (err) {
+    console.error('견적 폼 접수 오류:', err.message);
+    res.status(500).json({ error: '저장 실패' });
+  }
+});
+
+// ── 견적 목록 API (어드민 전용 — PII 포함) ─────────────────
+app.get('/api/quotes', requireAdmin, async (_req, res) => {
   try {
     const { data, error } = await supabase
       .from('quotes')

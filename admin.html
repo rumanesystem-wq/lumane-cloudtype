@@ -488,8 +488,6 @@
           <div id="hdMeta" style="font-size:11px;color:#9ca3af;margin-top:2px;"></div>
         </div>
         <div style="display:flex;align-items:center;gap:8px;">
-          <button id="hdReparseBtn" onclick="reparseConversation()" style="background:#6366f1;color:#fff;border:none;border-radius:8px;padding:6px 12px;font-size:12px;cursor:pointer;white-space:nowrap;">🔄 재파싱</button>
-          <button id="hdNotionBtn" onclick="resendToNotion()" style="background:#000;color:#fff;border:none;border-radius:8px;padding:6px 12px;font-size:12px;cursor:pointer;white-space:nowrap;">📋 Notion</button>
           <button id="hdRegisterQuoteBtn" onclick="registerQuoteFromConversation()" style="background:#c9a96e;color:#fff;border:none;border-radius:8px;padding:6px 12px;font-size:12px;cursor:pointer;white-space:nowrap;">📋 견적등록</button>
           <button id="hdDeleteBtn" onclick="deleteConversation()" style="background:#ef4444;color:#fff;border:none;border-radius:8px;padding:6px 12px;font-size:12px;cursor:pointer;white-space:nowrap;">🗑 삭제</button>
           <button onclick="closeHistoryDetail()" style="background:none;border:none;font-size:20px;cursor:pointer;color:#9ca3af;">✕</button>
@@ -745,6 +743,7 @@
      자바스크립트 모듈 (순서 중요)
 ============================================= -->
 <script src="js/admin-config.js"></script>
+<script src="js/admin-state.js"></script>
 <script src="js/admin-live.js"></script>
 <script src="js/admin-modal.js"></script>
 <script src="js/admin-quote.js"></script>

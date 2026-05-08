@@ -886,49 +886,6 @@ function renderHistoryList(list) {
 let _currentHistoryId = null;
 let _currentHdSessionId = null;
 
-async function resendToNotion() {
-  if (!_currentHistoryId) return;
-  const btn = document.getElementById('hdNotionBtn');
-  btn.textContent = '전송 중…';
-  btn.disabled = true;
-  try {
-    const res = await fetch(`${SERVER}/api/admin/conversations/${_currentHistoryId}/resend-notion`, {
-      method: 'POST', headers: adminHeaders(),
-    });
-    if (!res.ok) { const d = await res.json(); throw new Error(d.error || res.status); }
-    btn.textContent = '✅ 전송 완료';
-  } catch (err) {
-    btn.textContent = '❌ 실패';
-    showToast(`Notion 재전송 실패: ${err.message}`, 'error');
-  } finally {
-    setTimeout(() => { btn.textContent = '📋 Notion 재전송'; btn.disabled = false; }, 3000);
-  }
-}
-
-async function reparseConversation() {
-  const historyId = _currentHistoryId;
-  if (!historyId) return;
-  const btn = document.getElementById('hdReparseBtn');
-  btn.textContent = '분석 중…';
-  btn.disabled = true;
-  let resetTimer;
-  try {
-    const res = await fetch(`${SERVER}/api/admin/conversations/${encodeURIComponent(historyId)}/reparse`, {
-      method: 'POST', headers: adminHeaders(),
-    });
-    if (!res.ok) { const d = await res.json(); throw new Error(d.error || res.status); }
-    await res.json();
-    btn.textContent = '✅ 완료';
-    showToast('재파싱 완료! 업데이트 중…', 'success');
-    clearTimeout(resetTimer);
-    setTimeout(() => openHistoryDetail(historyId), 1500);
-  } catch (err) {
-    btn.textContent = '❌ 실패';
-    showToast(`재파싱 실패: ${err.message}`, 'error');
-    resetTimer = setTimeout(() => { btn.textContent = '🔄 재파싱'; btn.disabled = false; }, 3000);
-  }
-}
-
 async function openHistoryDetail(id) {
   _currentHistoryId = id;
   _currentHdSessionId = null;
@@ -1192,7 +1149,6 @@ let _notifiedMsgCounts = {};
 
 function notifyNewSession(sess) {
   if (Notification.permission !== 'granted') return;
-  if (document.visibilityState === 'visible') return; // 탭이 활성화 중이면 알림 불필요
   new Notification('💬 새 상담 연결', {
     body: `${sess.customerName || '고객'}님이 상담을 시작했습니다`,
     icon: '/favicon.ico',
@@ -1201,7 +1157,6 @@ function notifyNewSession(sess) {
 
 function notifyNewMessage(sess) {
   if (Notification.permission !== 'granted') return;
-  if (document.visibilityState === 'visible') return;
   new Notification('📩 새 메시지', {
     body: `${sess.customerName || '고객'}: 새 메시지가 도착했습니다`,
     icon: '/favicon.ico',

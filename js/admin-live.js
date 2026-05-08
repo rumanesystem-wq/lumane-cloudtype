@@ -40,14 +40,14 @@ async function checkHistoryCount() {
 
 function goToUnreadHistory() {
   switchTab('dashboard');
-  _unreadOnlyMode = true; // 항상 ON 고정. 끄기는 배너 [전체 보기] 버튼으로만.
+  setUnreadOnlyMode(true); // 항상 ON 고정. 끄기는 배너 [전체 보기] 버튼으로만.
   renderDashboardSessions(_cachedLiveSessions);
   setTimeout(() => {
     document.getElementById('dashboardSessionList')?.scrollIntoView({ behavior: 'smooth' });
   }, 100);
 }
 function clearUnreadFilter() {
-  _unreadOnlyMode = false;
+  setUnreadOnlyMode(false);
   renderDashboardSessions(_cachedLiveSessions);
 }
 window.clearUnreadFilter = clearUnreadFilter;
@@ -104,7 +104,7 @@ async function deleteSavedConvFromDash(id, ev) {
       method: 'DELETE', headers: adminHeaders(),
     });
     if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || res.status); }
-    _cachedConversations = _cachedConversations.filter(c => String(c.id) !== String(id));
+    setCachedConversations(_cachedConversations.filter(c => String(c.id) !== String(id)));
     renderDashboardSessions(_cachedLiveSessions);
     if (typeof showToast === 'function') showToast('상담 기록이 삭제됐습니다.', 'success');
   } catch (err) {
@@ -166,6 +166,7 @@ function startBgPolling() {
       if (countEl) countEl.textContent  = count + '개 세션';
       // 대시보드도 업데이트
       _checkLiveNotifications(sessions);
+      if (typeof window._checkNotifications === 'function') window._checkNotifications(sessions);
       renderDashboardSessions(sessions);
       const dashDot   = document.getElementById('dashDot');
       const dashCount = document.getElementById('dashCount');
@@ -205,8 +206,9 @@ function stopLivePolling() {
   livePollTimer        = null;
   liveMsgPollTimer     = null;
   liveSelectedId       = null;
-  _selectedSavedConvId = null;
+  setSelectedSavedConvId(null);
   liveAdminMode        = false;
+  setLiveSelectedByClick(false);
   startBgPolling(); // 탭 이탈 후에도 알림 뱃지 유지
 }
 
@@ -291,7 +293,7 @@ function renderLiveSessionList(sessions) {
     const msgCount   = s.messageCount ?? 0;
     return `
       <div data-session-id="${escAttr(s.id)}"
-        onclick="markSessionSeen('${escAttr(s.id)}');selectLiveSession('${escAttr(s.id)}')"
+        onclick="selectLiveSession('${escAttr(s.id)}',true)"
         style="padding:12px 14px;border-radius:10px;cursor:pointer;margin-bottom:6px;
           border:2px solid ${isSelected ? '#7c3aed' : '#e5e7eb'};
           background:${isSelected ? '#faf5ff' : '#fff'};transition:all .15s;">
@@ -391,7 +393,7 @@ window.getAdminSetting  = getAdminSetting;
 
 /* ── 세션별 마지막으로 읽은 메시지 수 추적 (서버 저장) ── */
 const _seenMsgCounts = {};
-let _seenCountsLoaded = false;
+// _seenCountsLoaded 는 admin-state.js로 이동됨 (setter: setSeenCountsLoaded)
 function _getSeenSessions() {
   return new Set(Object.keys(_seenMsgCounts));
 }
@@ -414,7 +416,7 @@ async function _loadSeenCounts() {
       localStorage.removeItem(oldKey);
       localStorage.removeItem('lumane_seen_counts');
     }
-    _seenCountsLoaded = true;
+    setSeenCountsLoaded(true);
     // 카운트 로드 완료 후 캐시된 데이터로 대시보드 재렌더링
     if (_cachedLiveSessions.length > 0 || _cachedConversations.length > 0) {
       renderDashboardSessions(_cachedLiveSessions, _cachedConversations);
@@ -485,10 +487,8 @@ function _formatSizeRaw(raw) {
 }
 
 /* ── 저장된 상담 캐시 ── */
-let _cachedConversations  = [];
-let _cachedLiveSessions   = [];
-let _selectedSavedConvId  = null; // 완료 대화 선택 추적
-let _unreadOnlyMode       = false; // 미확인만 보기 필터
+// _cachedConversations / _cachedLiveSessions / _selectedSavedConvId / _unreadOnlyMode 는 admin-state.js로 이동됨
+// (setters: setCachedConversations / setCachedLiveSessions / setSelectedSavedConvId / setUnreadOnlyMode)
 
 function _refreshDashBadge() {
   // 책갈피(seen-counts) 로드 전에는 카운트 계산 보류 — 잘못된 미확인 표시 방지
@@ -529,7 +529,7 @@ async function fetchDashboardConversations() {
     const res = await fetch(`${SERVER}/api/admin/conversations`, { headers: adminHeaders() });
     if (!res.ok) return;
     const data = await res.json();
-    _cachedConversations = (data.conversations || []).slice(0, 30);
+    setCachedConversations((data.conversations || []).slice(0, 30));
     _refreshDashBadge();
     _checkConvNotifications();
     renderDashboardSessions(_cachedLiveSessions);
@@ -539,17 +539,16 @@ async function fetchDashboardConversations() {
 /* ================================================================
    알림 시스템
 ================================================================ */
-let _notifSeq       = 0;
+// _notifSeq 는 admin-state.js로 이동됨 (helper: incNotifSeq — postfix++ 대체)
 const _notifications = [];
-let _liveNotifReady  = false;
-let _convNotifReady  = false;
+// _liveNotifReady / _convNotifReady 는 admin-state.js로 이동됨 (setters: setLiveNotifReady, setConvNotifReady)
 
 /* 알림 중복 방지 — 페이지 세션 내 인메모리 (localStorage 오염 방지) */
 const _notifiedLiveIds = new Set();
 const _notifiedConvIds = new Set();
 
 function _addNotif(type, title, body, targetId) {
-  _notifications.unshift({ id: String(_notifSeq++), type, title, body, targetId, time: new Date(), read: false });
+  _notifications.unshift({ id: String(incNotifSeq()), type, title, body, targetId, time: new Date(), read: false });
   if (_notifications.length > 50) _notifications.length = 50;
   _renderNotifList();
   _updateBellBadge();
@@ -598,7 +597,7 @@ function _checkConvNotifications() {
     const region = c.region ? ' · ' + c.region : '';
     _addNotif('saved', '새 상담이 저장됐습니다 📁', getConvLabel(c) + region, c.id);
   });
-  _convNotifReady = true;
+  setConvNotifReady(true);
 }
 
 function _checkLiveNotifications(sessions) {
@@ -611,7 +610,7 @@ function _checkLiveNotifications(sessions) {
     if (adminSeen.has(sid)) return;
     _addNotif('live_start', '새로운 고객님이 오셨습니다 🙋', s.customerName || '고객', s.id);
   });
-  _liveNotifReady = true;
+  setLiveNotifReady(true);
 }
 
 window.toggleNotifPanel = function() {
@@ -638,7 +637,7 @@ window.handleNotifClick = function(id) {
     if (typeof openHistoryDetail === 'function') openHistoryDetail(notif.targetId);
   } else {
     switchTab('live');
-    setTimeout(() => selectLiveSession(notif.targetId), 100);
+    setTimeout(() => selectLiveSession(notif.targetId, true), 100);
   }
 };
 
@@ -674,7 +673,7 @@ function renderDashboardSessions(sessions) {
         _resetSessions.delete(sessionId);
         markSessionSeen(sessionId);
         switchTab('live');
-        setTimeout(() => selectLiveSession(sessionId), 100);
+        setTimeout(() => selectLiveSession(sessionId, true), 100);
       } else if (convCard) {
         const convId = convCard.dataset.convId;
         // 저장 상담도 message_count 포함해서 저장 (0 저장 방지)
@@ -694,7 +693,7 @@ function renderDashboardSessions(sessions) {
     }, true);
   }
 
-  _cachedLiveSessions = sessions;
+  setCachedLiveSessions(sessions);
   _refreshDashBadge();
 
   // 서버 읽음 데이터 첫 로드 후 테이블이 비어있으면 현재 모든 세션을 읽음 처리 (초기화)
@@ -804,6 +803,8 @@ function renderDashboardSessions(sessions) {
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:3px;">
               <div style="display:flex;align-items:center;gap:5px;">
                 <span style="font-size:15px;font-weight:${unread?'700':'600'};color:#111827;">${escAdmin(s.customerName)}</span>
+                ${s.startedAt ? `<span style="font-size:11px;color:#9ca3af;font-weight:500;" title="첫 상담 시각">${new Date(s.startedAt).toLocaleTimeString('ko-KR', { hour12:false, hour:'2-digit', minute:'2-digit', second:'2-digit' })}</span>` : ''}
+                <span style="font-size:11px;padding:1px 6px;border-radius:6px;background:#f3f4f6;color:#4b5563;font-weight:600;">${escAdmin(s.src || '직접방문')}</span>
                 ${s.isTest ? '<span style="font-size:10px;padding:1px 5px;border-radius:6px;background:#fef3c7;color:#92400e;font-weight:700;">테스트</span>' : ''}
                 ${!s.isTest && s.isReturning ? '<span style="font-size:10px;padding:1px 5px;border-radius:6px;background:#d1fae5;color:#065f46;font-weight:700;">재방문</span>' : ''}
                 ${!s.isTest && !s.isReturning ? '<span style="font-size:10px;padding:1px 5px;border-radius:6px;background:#e0f2fe;color:#0369a1;font-weight:700;">첫방문</span>' : ''}
@@ -853,6 +854,7 @@ function renderDashboardSessions(sessions) {
             <div style="flex:1;min-width:0;">
               <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap;">
                 <span style="font-size:15px;font-weight:${isNew?'700':'600'};color:#111827;">${escAdmin(getConvLabel(c))}</span>
+                <span style="font-size:11px;padding:1px 6px;border-radius:6px;background:#f3f4f6;color:#4b5563;font-weight:600;">${escAdmin(c.src || '직접방문')}</span>
                 ${c.layout ? `<span style="font-size:11px;padding:1px 6px;border-radius:6px;background:#ede9fe;color:#7c3aed;font-weight:600;">${escAdmin(c.layout)}</span>` : ''}
                 ${c.is_test ? '<span style="font-size:10px;padding:1px 5px;border-radius:6px;background:#fef3c7;color:#92400e;font-weight:700;">테스트</span>' : ''}
                 ${isNew ? '<span style="font-size:10px;padding:1px 5px;border-radius:6px;background:#ef4444;color:#fff;font-weight:700;">NEW</span>' : ''}
@@ -899,12 +901,16 @@ function renderDashboardSessions(sessions) {
 
 /**
  * 세션 선택 — 오른쪽 채팅 패널에 표시
+ * byClick=true: 사용자가 명시적으로 카드 클릭 (읽음 처리)
+ * byClick=false: 자동 선택 (읽음 처리 안 함, 빨간 NEW 유지)
  */
-async function selectLiveSession(sessionId) {
+// _liveSelectedByClick 는 admin-state.js로 이동됨 (setter: setLiveSelectedByClick)
+async function selectLiveSession(sessionId, byClick = false) {
   clearInterval(liveMsgPollTimer);
   liveMsgPollTimer = null;
   liveSelectedId = sessionId;
-  markSessionSeen(sessionId);
+  setLiveSelectedByClick(byClick);
+  if (byClick) markSessionSeen(sessionId);
 
   await fetchLiveSessionMsgs();
 
@@ -940,7 +946,7 @@ window.liveGoBack = function() {
   clearInterval(liveMsgPollTimer);
   liveMsgPollTimer     = null;
   liveSelectedId       = null;
-  _selectedSavedConvId = null;
+  setSelectedSavedConvId(null);
 };
 
 /**
@@ -950,7 +956,7 @@ window.selectSavedConvInPanel = function(convId) {
   clearInterval(liveMsgPollTimer);
   liveMsgPollTimer     = null;
   liveSelectedId       = null;
-  _selectedSavedConvId = convId;
+  setSelectedSavedConvId(convId);
 
   // _saveSeenCount 먼저 호출 — markSessionSeen에서 0 저장 제거 후 호출자 책임
   // String 변환 — c.id가 lumane schema에서 bigint(숫자)일 때 string convId와 매칭되도록
@@ -1024,8 +1030,11 @@ async function fetchLiveSessionMsgs() {
     if (!res.ok) return;
     const data = await res.json();
     // 실시간으로 열람 중인 세션은 항상 읽음 처리 (카톡처럼 보는 중에는 배지 안 뜸)
-    const sessData = _cachedLiveSessions.find(s => String(s.id) === String(liveSelectedId));
-    if (sessData) _saveSeenCount(String(liveSelectedId), sessData.messageCount ?? 0);
+    // 사용자가 직접 클릭한 세션만 자동 읽음 (자동 선택은 빨간 NEW 유지)
+    if (_liveSelectedByClick) {
+      const sessData = _cachedLiveSessions.find(s => String(s.id) === String(liveSelectedId));
+      if (sessData) _saveSeenCount(String(liveSelectedId), sessData.messageCount ?? 0);
+    }
     renderLiveChatPanel(data.session);
   } catch { /* 무시 */ }
 }
