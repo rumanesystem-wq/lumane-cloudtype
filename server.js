@@ -577,27 +577,77 @@ app.get('/api/og', async (req, res) => {
 });
 
 const VALID_SHAPES = ['ㄱ자', 'ㄷ자', 'ㅡ자', '11자', 'ㅁ자'];
-const SCORE_THRESHOLD = 50;
-function scoreRow(row, shape, unitsNum, optList) {
-  let score = 0;
-  if (shape && row.shape === shape) score += 100;
-  if (unitsNum > 0 && row.units != null) {
-    const diff = Math.abs(row.units - unitsNum);
-    score += Math.max(0, 50 - diff * 15);
+const SCORE_THRESHOLD = 0.30;   // 0~1 정규화 점수 (옛 50/100 정수 → 비율)
+
+// LLM (SHOW_EXAMPLE 태그) 표기 → DB modules_normalized 와 비교용 표기로 정규화.
+// 옛 dressroom_images 의 substring truncation ('악세사리', '아일랜드') 결함 정정.
+const MODULE_NORMALIZE_FORM = {
+  '거울장': '거울장',
+  '디바이더': '디바이더',
+  '2단서랍': '2단서랍', '3단서랍': '3단서랍', '4단서랍': '4단서랍',
+  '바지걸이': '바지걸이',
+  '이불반장': '이불반장', '이불긴장': '이불긴장',
+  '화장대': '화장대',
+  '아일랜드': '아일랜드장', '아일랜드장': '아일랜드장',
+  '악세사리': '악세사리장', '악세서리': '악세사리장',
+  '악세사리장': '악세사리장', '악세서리장': '악세사리장',
+  '5단': '5단선반', '6단': '6단선반', '7단': '7단선반',
+  '5단선반': '5단선반', '6단선반': '6단선반', '7단선반': '7단선반',
+  '코너5단': '코너5단선반', '코너6단': '코너6단선반', '코너7단': '코너7단선반',
+  '공간박스': '공간박스',
+  // 매칭 무시 (양쪽 시도 — 별도 처리 / 표준 칸 ID)
+  '이불장': null,             // 이불반장 / 이불긴장 양쪽 시도
+  '6단(7단)선반': null,       // 6단 / 7단 양쪽 시도
+  '상하옷봉': null, '긴옷행거': null,  // 표준 칸 — JPG 명에 없음
+};
+
+function normalizeOptList(optList) {
+  // 수량 표기 제거 + 동의어 통일.
+  const out = [];
+  for (let raw of optList) {
+    const stripped = String(raw).replace(/\s*[-]?\s*\d+\s*개\s*$/, '').trim();
+    if (!(stripped in MODULE_NORMALIZE_FORM)) {
+      out.push(stripped);   // 미등록 — 그대로 (매칭 안 될 가능성)
+    } else if (MODULE_NORMALIZE_FORM[stripped] !== null) {
+      out.push(MODULE_NORMALIZE_FORM[stripped]);
+    }
+    // null 케이스 (이불장, 6단(7단)선반, 상하옷봉, 긴옷행거) 는 무시
   }
-  let rowOpts = [];
-  if (Array.isArray(row.options)) {
-    rowOpts = row.options;
-  } else if (typeof row.options === 'string') {
-    try { const p = JSON.parse(row.options); rowOpts = Array.isArray(p) ? p : []; } catch { rowOpts = []; }
+  return Array.from(new Set(out));
+}
+
+function scoreRow(row, shape, cellsNum, optSet) {
+  // shape 다르면 0 (필수 필터)
+  if (shape && row.shape !== shape) return 0;
+
+  // cell_match — 정규화 비율 (옛 절대값 페널티 → 0~1 비율)
+  let cellMatch = 1.0;
+  if (cellsNum > 0 && row.cells != null) {
+    const m = Math.max(cellsNum, row.cells);
+    cellMatch = m === 0 ? 0 : 1 - Math.abs(row.cells - cellsNum) / m;
   }
-  for (const opt of optList) {
-    if (rowOpts.includes(opt)) score += 20;
+
+  // module_overlap — jaccard (양방향, 옛 단방향 includes 보강)
+  const rowSet = new Set(Array.isArray(row.modules_normalized)
+    ? row.modules_normalized : []);
+  let modOverlap;
+  if (optSet.size === 0 && rowSet.size === 0) {
+    modOverlap = 1.0;
+  } else if (optSet.size === 0 || rowSet.size === 0) {
+    modOverlap = 0.3;        // 한쪽만 옵션 — 약한 매칭
+  } else {
+    let intersect = 0;
+    for (const x of optSet) if (rowSet.has(x)) intersect++;
+    const union = optSet.size + rowSet.size - intersect;
+    modOverlap = union === 0 ? 0 : intersect / union;
   }
-  return score;
+
+  return 0.4 * cellMatch + 0.6 * modOverlap;
 }
 
 // ── 예시 이미지 매칭 API (DB 기반) ───────────────────────────
+// dressroom_images_v2 테이블 사용 (이슈 #22 — 옛 dressroom_images 결함 정정 후).
+// 옛 테이블 결함: 옵션 substring truncation, ㅡ자/11자 표기 일관성, 사람 추적 불가.
 app.get('/api/find-example', chatRateLimit, async (req, res) => {
   let { shape = '', units = '', options = '' } = req.query;
   // AI가 ㅡ 대신 대시 문자(—, –, -)를 쓰는 경우 정규화
@@ -608,30 +658,34 @@ app.get('/api/find-example', chatRateLimit, async (req, res) => {
   const rawOptions = typeof options === 'string' ? options : '';
   const rawUnits   = typeof units   === 'string' ? units   : '';
   const optList = rawOptions.split(',').map(s => s.trim().slice(0, 50)).filter(Boolean).slice(0, 10);
-  const unitsNum = Math.min(Math.max(parseInt(rawUnits) || 0, 0), 100);
+  const cellsNum = Math.min(Math.max(parseInt(rawUnits) || 0, 0), 100);
+  const optSet = new Set(normalizeOptList(optList));
 
   try {
     let query = supabase
-      .from('dressroom_images')
-      .select('url, shape, units, options');
+      .from('dressroom_images_v2')
+      .select('url, shape, cells, modules_normalized, variant_no');
     if (shape) query = query.eq('shape', shape);
     const { data, error } = await query;
 
     if (error) return res.json({ success: false, reason: 'db_error' });
     if (!data || data.length === 0) return res.json({ success: false, reason: 'db_empty' });
 
-    let best = null;
-    let bestScore = -1;
-    for (const row of data) {
-      const score = scoreRow(row, shape, unitsNum, optList);
-      if (score > bestScore) { bestScore = score; best = row; }
+    // 점수 계산 + 정렬
+    const scored = data.map(row => ({ row, score: scoreRow(row, shape, cellsNum, optSet) }));
+    scored.sort((a, b) => b.score - a.score);
+    const top = scored.filter(s => s.score >= SCORE_THRESHOLD);
+
+    if (top.length === 0) {
+      return res.json({ success: false, reason: 'no_match' });
     }
 
-    if (bestScore >= SCORE_THRESHOLD && best?.url) {
-      res.json({ success: true, url: best.url });
-    } else {
-      res.json({ success: false, reason: 'no_match' });
-    }
+    // 같은 score 클러스터 내 random pick — variant 다양성 (#23 의 prelude)
+    const bestScore = top[0].score;
+    const cluster = top.filter(s => Math.abs(s.score - bestScore) < 0.001);
+    const pick = cluster[Math.floor(Math.random() * cluster.length)];
+
+    res.json({ success: true, url: pick.row.url });
   } catch (err) {
     console.error('[find-example] DB 오류:', err.message);
     res.json({ success: false, reason: 'internal_error' });
