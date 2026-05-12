@@ -105,6 +105,22 @@ function requireAdmin(req, res, next) {
 // 모든 /api/admin/* 라우트에 인증 적용
 app.use('/api/admin', requireAdmin);
 
+// ── 어드민 행동 감사 로그 헬퍼 (실패해도 본 작업은 진행) ──
+async function logAdminAudit(req, action, target_table, target_id) {
+  try {
+    await supabase.from('admin_audit_log').insert({
+      action,
+      target_table,
+      target_id: target_id != null ? String(target_id) : null,
+      admin_name: (req.headers['x-admin-name'] || '').toString().slice(0, 50) || null,
+      admin_ip: req.ip || null,
+      admin_user_agent: (req.headers['user-agent'] || '').toString().slice(0, 500) || null,
+    });
+  } catch (err) {
+    console.error(`[FAIL_AUDIT] action=${action} target=${target_id} err=${err.message}`);
+  }
+}
+
 // ── 라이브 세션 관리 (메모리) ─────────────────────────────────
 // 서버 재시작 시 초기화됨. 필요 시 Supabase로 이전 가능.
 const SESSION_ID_RE = /^S-\d{13}-[a-z0-9]{5}$/;
@@ -926,7 +942,8 @@ app.post('/api/session/register', async (req, res) => {
       const { count } = await supabase
         .from('conversations')
         .select('id', { count: 'exact', head: true })
-        .eq('customer_name', sess.nickname);
+        .eq('customer_name', sess.nickname)
+        .is('deleted_at', null);
       sess.isReturning = (count || 0) > 0;
     } catch { sess.isReturning = false; }
   }
@@ -934,10 +951,21 @@ app.post('/api/session/register', async (req, res) => {
 });
 
 // ── 어드민: 유입 소스 통계 ────────────────────────────────
+const _sourceStatsCache = new Map(); // period -> { payload, expiresAt }
+const SOURCE_STATS_TTL = 60 * 1000;  // 60초
+
 app.get('/api/admin/source-stats', async (req, res) => {
   const VALID_PERIODS = ['today', 'week', 'month', 'all'];
   const period = VALID_PERIODS.includes(req.query.period) ? req.query.period : 'today';
-  let query = supabase.from('visitor_logs').select('src, src2, session_id, visited_date');
+
+  // 메모리 캐시 히트 시 즉시 반환
+  const cached = _sourceStatsCache.get(period);
+  if (cached && cached.expiresAt > Date.now()) {
+    return res.json(cached.payload);
+  }
+
+  // 필요한 컬럼만 + 최대 10000행 safety limit
+  let query = supabase.from('visitor_logs').select('src, visited_date').limit(10000);
   const today = new Date().toISOString().slice(0, 10);
   if (period === 'today') {
     query = query.eq('visited_date', today);
@@ -946,6 +974,10 @@ app.get('/api/admin/source-stats', async (req, res) => {
     query = query.gte('visited_date', d.toISOString().slice(0, 10));
   } else if (period === 'month') {
     const d = new Date(); d.setMonth(d.getMonth() - 1);
+    query = query.gte('visited_date', d.toISOString().slice(0, 10));
+  } else if (period === 'all') {
+    // all도 최근 90일로 제한 (오래된 데이터 누적 시 무한정 커지지 않게)
+    const d = new Date(); d.setDate(d.getDate() - 90);
     query = query.gte('visited_date', d.toISOString().slice(0, 10));
   }
   try {
@@ -959,7 +991,9 @@ app.get('/api/admin/source-stats', async (req, res) => {
     const list = Object.entries(counts)
       .map(([src, count]) => ({ src, count }))
       .sort((a, b) => b.count - a.count);
-    res.json({ period, total: (data || []).length, counts: list });
+    const payload = { period, total: (data || []).length, counts: list };
+    _sourceStatsCache.set(period, { payload, expiresAt: Date.now() + SOURCE_STATS_TTL });
+    res.json(payload);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1049,6 +1083,7 @@ app.get('/api/admin/stats', async (_req, res) => {
     const { data, error } = await supabase
       .from('conversations')
       .select('id, phone, started_at')
+      .is('deleted_at', null)
       .order('id', { ascending: true });
     if (error) throw error;
 
@@ -1097,6 +1132,7 @@ app.get('/api/admin/stat-sessions', async (req, res) => {
     let query = supabase
       .from('conversations')
       .select('id, customer_name, phone, region, layout, started_at')
+      .is('deleted_at', null)
       .order('started_at', { ascending: false });
 
     if (from) query = query.gte('started_at', from.toISOString());
@@ -1270,8 +1306,8 @@ app.post('/api/admin/message', (req, res) => {
 app.get('/api/admin/conversations', async (req, res) => {
   try {
     const [{ data: real, error: e1 }, { data: test, error: e2 }] = await Promise.all([
-      supabase.from('conversations').select('*').order('id', { ascending: false }).limit(200),
-      supabase.from('test_conversations').select('*').order('id', { ascending: false }).limit(200),
+      supabase.from('conversations').select('*').is('deleted_at', null).order('id', { ascending: false }).limit(200),
+      supabase.from('test_conversations').select('*').is('deleted_at', null).order('id', { ascending: false }).limit(200),
     ]);
     if (e1) throw e1;
     if (e2) throw e2;
@@ -1292,8 +1328,10 @@ app.get('/api/admin/conversations/:id', async (req, res) => {
       .from('conversations')
       .select('*')
       .eq('id', req.params.id)
+      .is('deleted_at', null)
       .single();
     if (error) throw error;
+    if (!data) return res.status(404).json({ error: '삭제된 상담이거나 존재하지 않습니다' });
     res.json({ conversation: data });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1307,13 +1345,40 @@ app.delete('/api/admin/conversations/:id', requireAdmin, async (req, res) => {
   try {
     const { error } = await supabase
       .from('conversations')
-      .delete()
+      .update({ deleted_at: new Date().toISOString() })
       .eq('id', req.params.id);
     if (error) throw error;
-    console.log(`🗑 상담 삭제됨: ${req.params.id}`);
+    await logAdminAudit(req, 'soft_delete_conversation', 'conversations', req.params.id);
+    const who = req.headers['x-admin-name'] || 'unknown';
+    console.log(`🗑 상담 soft-delete: id=${req.params.id} admin=${who}`);
     res.json({ ok: true });
   } catch (err) {
-    console.error('상담 삭제 오류:', err.message);
+    console.error(`[FAIL_DELETE_CONV] id=${req.params.id} err=${err.message}`);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── 어드민: 라이브 세션 즉시 삭제 (메모리 + DB 양쪽) ──────────
+app.delete('/api/admin/sessions/:sessionId', requireAdmin, async (req, res) => {
+  const sessionId = req.params.sessionId;
+  if (!sessionId) return res.status(400).json({ error: 'sessionId 필요' });
+  try {
+    // 메모리 세션은 제거 (어차피 휘발성, soft-delete 의미 없음)
+    const existed = sessions.delete(sessionId);
+    // DB는 soft-delete (양 테이블 병렬)
+    const nowIso = new Date().toISOString();
+    const [r1, r2] = await Promise.allSettled([
+      supabase.from('conversations').update({ deleted_at: nowIso }).eq('session_id', sessionId),
+      supabase.from('test_conversations').update({ deleted_at: nowIso }).eq('session_id', sessionId),
+    ]);
+    if (r1.status === 'rejected' || r1.value?.error) console.warn('conversations soft-delete 경고:', r1.reason?.message || r1.value?.error?.message);
+    if (r2.status === 'rejected' || r2.value?.error) console.warn('test_conversations soft-delete 경고:', r2.reason?.message || r2.value?.error?.message);
+    await logAdminAudit(req, 'soft_delete_session', 'sessions', sessionId);
+    const who = req.headers['x-admin-name'] || 'unknown';
+    console.log(`🗑 라이브 세션 soft-delete: ${sessionId} (memory=${existed}, admin=${who})`);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(`[FAIL_DELETE_SESSION] id=${sessionId} err=${err.message}`);
     res.status(500).json({ error: err.message });
   }
 });
@@ -1325,8 +1390,10 @@ app.post('/api/admin/conversations/:id/register-quote', requireAdmin, async (req
       .from('conversations')
       .select('*')
       .eq('id', req.params.id)
+      .is('deleted_at', null)
       .single();
     if (error) throw error;
+    if (!c) return res.status(404).json({ error: '삭제된 상담이거나 존재하지 않습니다' });
 
     const quoteNumber = 'KB-' + new Date().toISOString().slice(0,10).replace(/-/g,'') + '-' + String(Date.now()).slice(-4);
 
