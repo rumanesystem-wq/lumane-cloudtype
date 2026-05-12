@@ -3,17 +3,36 @@
 ================================================================ */
 
 // 서버 주소
-const SERVER = 'https://port-0-lumane-cloudtype-mojs7tod1c6ae3f9.sel3.cloudtype.app';
+const SERVER = 'https://lumane-server.onrender.com';
 
 // Admin API 인증 토큰 — server.js .env의 ADMIN_TOKEN 값과 일치해야 합니다
 const ADMIN_TOKEN = '423920d58ecc5da3986baaa5580e8d90933ef98544cddbd9e497066af1967e7b';
 
+/* ── 어드민 본인 식별 이름 (audit 로그용) ── */
+const ADMIN_NAME_KEY = 'lumane_admin_name';
+function getAdminName() {
+  let name = localStorage.getItem(ADMIN_NAME_KEY);
+  if (!name) {
+    name = (prompt('어드민 본인 이름을 입력해 주세요 (audit 로그용, 한 번만 입력)') || '').trim().slice(0, 50);
+    if (name) localStorage.setItem(ADMIN_NAME_KEY, name);
+  }
+  return name || '';
+}
+function setAdminName(n) {
+  const v = (n || '').trim().slice(0, 50);
+  if (v) localStorage.setItem(ADMIN_NAME_KEY, v);
+  else localStorage.removeItem(ADMIN_NAME_KEY);
+}
+
 /** Admin API 공통 헤더 */
 function adminHeaders() {
-  return {
+  const h = {
     'Content-Type': 'application/json',
     'Authorization': `Bearer ${ADMIN_TOKEN}`,
   };
+  const name = localStorage.getItem(ADMIN_NAME_KEY);
+  if (name) h['X-Admin-Name'] = name;
+  return h;
 }
 
 /* ── 전역 상태 ── */
