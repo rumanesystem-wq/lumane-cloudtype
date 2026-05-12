@@ -851,11 +851,6 @@ app.post('/api/chat', chatRateLimit, async (req, res) => {
     // - 세션당 최초 1회 (대화 시작 시점)만 발사
     // - 마지막 메시지가 user 인 경우 = 신규 입력
     // - SLACK_WEBHOOK_URL 미설정 시 자동 off
-    // [DEBUG] 진단 로그 — 원인 파악 후 제거 예정
-    {
-      const _lastMsg = messages[messages.length - 1];
-      console.log(`[SLACK_TRACE] hasUrl=${!!process.env.SLACK_WEBHOOK_URL} notified=${!!sess.slackNotified} lastRole=${_lastMsg?.role} contentType=${typeof _lastMsg?.content} msgCount=${messages.length} session=${sessionId?.slice(0, 8)}`);
-    }
     if (process.env.SLACK_WEBHOOK_URL && !sess.slackNotified) {
       const lastMsg = messages[messages.length - 1];
       if (lastMsg?.role === 'user' && typeof lastMsg.content === 'string') {
@@ -864,16 +859,13 @@ app.post('/api/chat', chatRateLimit, async (req, res) => {
           ? lastMsg.content.slice(0, 200) + '…'
           : lastMsg.content;
         const label = sess.customerName || sessionId.slice(0, 8);
-        console.log(`[SLACK_FIRE] session=${sessionId.slice(0, 8)} label=${label}`);
         fetch(process.env.SLACK_WEBHOOK_URL, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             text: `🆕 신규 상담 | *${label}*\n${preview}`,
           }),
-        })
-          .then(r => console.log(`[SLACK_RESP] status=${r.status} session=${sessionId.slice(0, 8)}`))
-          .catch(e => console.error('[SLACK_NOTIFY_FAIL]', e.message));
+        }).catch(e => console.error('[SLACK_NOTIFY_FAIL]', e.message));
       }
     }
 
