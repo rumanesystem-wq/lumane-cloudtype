@@ -1076,9 +1076,6 @@ function hideTkTooltip() {
    앱 초기화
 ================================================================ */
 
-/* 어드민 본인 이름 1회 입력 (audit 로그용) */
-if (typeof getAdminName === 'function') getAdminName();
-
 checkServer().then(() => startBgPolling());
 setInterval(checkServer, 30000);
 initAdminFileUpload();
