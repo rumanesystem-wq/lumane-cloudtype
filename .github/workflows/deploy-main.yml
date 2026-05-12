@@ -40,6 +40,8 @@ jobs:
                   value: ${{ secrets.DB_SCHEMA }}
                 - name: SLACK_WEBHOOK_URL
                   value: ${{ secrets.SLACK_WEBHOOK_URL }}
+                - name: AI_PROVIDER
+                  value: anthropic
               buildenv: []
               healthz: /api/health
             context:
