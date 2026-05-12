@@ -25,6 +25,13 @@ const supabase = createClient(
   { db: { schema: process.env.DB_SCHEMA || 'public' } }
 );
 
+// customer 스키마 전용 클라이언트 (고객 DB 연동)
+const supabaseCustomer = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SECRET_KEY,
+  { db: { schema: 'customer' } }
+);
+
 // ── Notion 클라이언트 ─────────────────────────────────────────
 const notion = new NotionClient({ auth: process.env.NOTION_TOKEN });
 const NOTION_DB_ID = '221b622e-5115-4d07-b1fa-ed7fa52c6895'; // 상담 기록 DB
@@ -154,6 +161,9 @@ function getOrCreateSession(sessionId) {
       pendingAdminMsgs: [],
       customerName: null,
       customerNameIsTemp: true,
+      customerPhone: null,
+      lastQuoteReply: null,
+      customerInstallSaved: false,
       isTest: false,
       startedAt: new Date(),
       lastActivity: new Date(),
@@ -202,10 +212,9 @@ function parseOrderSheet(text) {
   }
 
   return {
-    // 개인정보(이름·전화·주소) 자동 추출 비활성화 — 지침에 따라 견적서에 절대 안 들어감
-    customer_name:   null,
-    phone:           null,
-    region:          null,
+    customer_name:   get(/성함[:\s]+([가-힣]{2,5})/) || get(/이름[:\s]+([가-힣]{2,5})/) || null,
+    phone:           get(/연락처[:\s]+(01[016789][-\s]?\d{3,4}[-\s]?\d{4})/) || get(/전화[:\s]+(01[016789][-\s]?\d{3,4}[-\s]?\d{4})/) || null,
+    region:          get(/설치\s*지역[:\s]+([^\n]+)/) || null,
     layout:          get(/설치\s*형태[:\s]+([^\n]+)/),
     frame_color:     frame_color || null,
     shelf_color:     shelf_color || null,
@@ -224,10 +233,13 @@ async function autoRegisterQuote(sess, reply) {
 
   const quoteNumber = 'KB-AI-' + sess.id.slice(-8).toUpperCase();
 
+  const phone = parsed.phone || sess.customerPhone || '';
+  const name  = parsed.customer_name || (sess.customerNameIsTemp ? '' : sess.customerName) || '';
+
   const payload = {
     quote_number:   quoteNumber,
-    name:           parsed.customer_name || sess.customerName || '',
-    phone:          parsed.phone || '',
+    name:           name,
+    phone:          phone,
     region:         parsed.region || '',
     layout_type:    parsed.layout || '',
     frame_color:    parsed.frame_color || '',
@@ -240,7 +252,42 @@ async function autoRegisterQuote(sess, reply) {
   };
 
   await supabase.from('quotes').upsert(payload, { onConflict: 'quote_number' });
+  sess.lastQuoteReply = reply;
   console.log(`✅ AI 견적 자동 등록: ${quoteNumber} (${payload.name})`);
+
+  // customer 스키마 저장 (이름+전화 모두 있을 때만)
+  if (name && phone) {
+    try {
+      const now = new Date().toISOString();
+      await supabaseCustomer.from('customer').upsert(
+        { name, phone, last_changed_at: now },
+        { onConflict: 'phone' }
+      );
+      if (!sess.customerInstallSaved) {
+        await supabaseCustomer.from('install').insert([{
+          name,
+          phone,
+          status:           '접수',
+          install_type:     parsed.layout || '',
+          color_frame:      parsed.frame_color || null,
+          color_shelf:      parsed.shelf_color || null,
+          options:          parsed.options_text || null,
+          quote_amount:     parsed.estimated_price || null,
+          notes:            `견적번호: ${quoteNumber}` + (parsed.size_raw ? `\n${parsed.size_raw}` : ''),
+          inflow_type:      'AI상담',
+          inflow_date:      now.split('T')[0],
+          saved_at:         now,
+          last_changed_at:  now,
+        }]);
+        sess.customerInstallSaved = true;
+        console.log(`✅ customer 스키마 저장 (AI상담): ${name} (${phone})`);
+      } else {
+        console.log(`customer.install 이미 저장됨, 건너뜀 (AI상담): ${name}`);
+      }
+    } catch (custErr) {
+      console.error('customer 스키마 저장 오류 (quotes는 저장됨):', custErr.message);
+    }
+  }
 }
 
 // ── 실시간 Supabase upsert (Notion 없음) ─────────────────────
@@ -918,6 +965,20 @@ app.post('/api/chat', chatRateLimit, async (req, res) => {
         }
       }
 
+      // 사용자 메시지에서 전화번호 추출 — 견적서 출력 후 고객이 연락처 입력 시
+      if (!sess.customerPhone && lastUserMsg) {
+        const phoneMatch = lastUserMsg.content.match(/01[016789][-\s]?\d{3,4}[-\s]?\d{4}/);
+        if (phoneMatch) {
+          sess.customerPhone = phoneMatch[0];
+          // 이미 견적서가 출력된 세션이면 customer 스키마에 즉시 재등록
+          if (sess.lastQuoteReply) {
+            autoRegisterQuote(sess, sess.lastQuoteReply).catch(e =>
+              console.error('customer 재등록 실패:', e.message)
+            );
+          }
+        }
+      }
+
       upsertConversation(sess).catch(e => {
         console.error(`[FAIL_AI_SAVE_1] session=${sess.id} err=${e.message}`);
         setTimeout(() => upsertConversation(sess).catch(e2 => console.error(`[FAIL_AI_SAVE_2] session=${sess.id} err=${e2.message}`)), 2000);
@@ -1541,6 +1602,41 @@ app.post('/api/quote', chatRateLimit, async (req, res) => {
     if (error) throw error;
 
     console.log(`✅ 견적 폼 접수: ${payload.quote_number} (${payload.name})`);
+
+    // customer 스키마 동시 저장 (phone 있을 때만)
+    if (payload.phone) {
+      try {
+        const now = new Date().toISOString();
+        await supabaseCustomer.from('customer').upsert(
+          { name: payload.name, phone: payload.phone, last_changed_at: now },
+          { onConflict: 'phone' }
+        );
+        await supabaseCustomer.from('install').insert([{
+          name:             payload.name,
+          phone:            payload.phone,
+          status:           '접수',
+          install_type:     payload.layout_type || null,
+          height_ceiling:   payload.height ? String(payload.height) : null,
+          side_a:           payload.width  ? String(payload.width)  : null,
+          side_b:           payload.depth  ? String(payload.depth)  : null,
+          color_frame:      payload.frame_color  || null,
+          color_shelf:      payload.shelf_color  || null,
+          options:          Array.isArray(payload.options) ? payload.options.join(', ') : null,
+          notes:            `견적번호: ${payload.quote_number}` + (payload.request_memo ? `\n${payload.request_memo}` : ''),
+          location:         payload.region || null,
+          inflow_type:      '폼제출',
+          inflow_date:      now.split('T')[0],
+          saved_at:         now,
+          last_changed_at:  now,
+        }]);
+        console.log(`✅ customer 스키마 저장 (폼제출): ${payload.name} (${payload.phone})`);
+      } catch (custErr) {
+        console.error('customer 스키마 저장 오류 (quotes는 저장됨):', custErr.message);
+      }
+    } else {
+      console.log('customer 스키마 저장 건너뜀 (phone 없음)');
+    }
+
     res.json({ ok: true, quote_number: payload.quote_number, id: data?.id });
   } catch (err) {
     console.error('견적 폼 접수 오류:', err.message);

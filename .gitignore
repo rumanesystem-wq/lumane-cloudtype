@@ -4,3 +4,9 @@ node_modules/
 .claude/
 *.bak
 루마네_프로젝트_대화기록.md
+
+# Claude 자동 생성 로그
+.claude/logs/
+
+# 개인 메모리 파일
+.claude/memory/
