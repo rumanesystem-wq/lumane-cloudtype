@@ -73,6 +73,30 @@ app.use(cors({
 }));
 app.use(express.json());
 
+// ── Slack 알림 헬퍼 (fire-and-forget, 카테고리 라벨링) ────────
+// 포맷: <이모지> [<서비스>|<카테고리>] <본문>
+// SLACK_WEBHOOK_URL 미설정 시 자동 off
+const SLACK_SERVICE = 'lumane-chatbot';
+function notifySlack(category, emoji, body) {
+  if (!process.env.SLACK_WEBHOOK_URL) return;
+  const text = `${emoji} [${SLACK_SERVICE}|${category}] ${body}`;
+  fetch(process.env.SLACK_WEBHOOK_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text }),
+  }).catch(e => console.error('[SLACK_NOTIFY_FAIL]', category, e.message));
+}
+
+// Rate limit 알림: IP 별 5분 쿨다운 (봇 트래픽 폭주 방지)
+const _rateLimitNotifyCache = new Map();
+function notifyRateLimitOnce(ip) {
+  const now = Date.now();
+  const last = _rateLimitNotifyCache.get(ip) || 0;
+  if (now - last < 5 * 60 * 1000) return;
+  _rateLimitNotifyCache.set(ip, now);
+  notifySlack('보안:RateLimit', '⚠️', `IP=${ip}`);
+}
+
 // ── Rate Limit — IP당 1분 10회 제한 ──────────────────────────
 const chatRateLimit = rateLimit({
   windowMs: 60 * 1000,   // 1분
@@ -80,6 +104,7 @@ const chatRateLimit = rateLimit({
   keyGenerator: ipKeyGenerator,
   handler: (req, res) => {
     console.warn(`🚫 Rate limit 초과: ${req.ip}`);
+    notifyRateLimitOnce(req.ip);
     res.status(429).json({
       error: '잠시 후 다시 시도해 주세요. (1분에 최대 10회 전송 가능)',
     });
@@ -270,6 +295,17 @@ async function autoRegisterQuote(sess, reply) {
   await supabase.from('quotes').upsert(payload, { onConflict: 'quote_number' });
   sess.lastQuoteReply = reply;
   console.log(`✅ AI 견적 자동 등록: ${quoteNumber} (${payload.name})`);
+
+  // Slack 알림 — 세션당 1회 (같은 quoteNumber upsert 중복 발사 방지)
+  if (!sess.quoteNotified) {
+    sess.quoteNotified = true;
+    const parts = [quoteNumber];
+    if (payload.name)        parts.push(payload.name);
+    if (payload.region)      parts.push(payload.region);
+    if (payload.layout_type) parts.push(payload.layout_type);
+    if (parsed.estimated_price) parts.push(`${Math.round(parsed.estimated_price / 10000)}만원`);
+    notifySlack('주문서:AI', '🤖', parts.join(' / '));
+  }
 
   // customer 스키마 저장 (이름+전화 모두 있을 때만)
   if (name && phone) {
@@ -906,7 +942,10 @@ app.post('/api/chat', chatRateLimit, async (req, res) => {
       }
       upsertConversation(sess).catch(e => {
         console.error(`[FAIL_SYNC_1] session=${sess.id} err=${e.message}`);
-        setTimeout(() => upsertConversation(sess).catch(e2 => console.error(`[FAIL_SYNC_2] session=${sess.id} err=${e2.message}`)), 2000);
+        setTimeout(() => upsertConversation(sess).catch(e2 => {
+          console.error(`[FAIL_SYNC_2] session=${sess.id} err=${e2.message}`);
+          notifySlack('장애:DB', '💾', `[SYNC] session=${sess.id.slice(0, 8)} err=${e2.message}`);
+        }), 2000);
       });
       return res.json({ ok: true, synced: messages.length });
     }
@@ -915,7 +954,7 @@ app.post('/api/chat', chatRateLimit, async (req, res) => {
     // - 세션당 최초 1회 (대화 시작 시점)만 발사
     // - 마지막 메시지가 user 인 경우 = 신규 입력
     // - SLACK_WEBHOOK_URL 미설정 시 자동 off
-    if (process.env.SLACK_WEBHOOK_URL && !sess.slackNotified) {
+    if (!sess.slackNotified) {
       const lastMsg = messages[messages.length - 1];
       if (lastMsg?.role === 'user' && typeof lastMsg.content === 'string') {
         sess.slackNotified = true;
@@ -923,13 +962,7 @@ app.post('/api/chat', chatRateLimit, async (req, res) => {
           ? lastMsg.content.slice(0, 200) + '…'
           : lastMsg.content;
         const label = sess.customerName || sessionId.slice(0, 8);
-        fetch(process.env.SLACK_WEBHOOK_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            text: `🆕 신규 상담 | *${label}*\n${preview}`,
-          }),
-        }).catch(e => console.error('[SLACK_NOTIFY_FAIL]', e.message));
+        notifySlack('신규상담', '🆕', `*${label}*\n${preview}`);
       }
     }
 
@@ -1020,9 +1053,15 @@ app.post('/api/chat', chatRateLimit, async (req, res) => {
 
       upsertConversation(sess).catch(e => {
         console.error(`[FAIL_AI_SAVE_1] session=${sess.id} err=${e.message}`);
-        setTimeout(() => upsertConversation(sess).catch(e2 => console.error(`[FAIL_AI_SAVE_2] session=${sess.id} err=${e2.message}`)), 2000);
+        setTimeout(() => upsertConversation(sess).catch(e2 => {
+          console.error(`[FAIL_AI_SAVE_2] session=${sess.id} err=${e2.message}`);
+          notifySlack('장애:DB', '💾', `[AI_SAVE] session=${sess.id.slice(0, 8)} err=${e2.message}`);
+        }), 2000);
       });
-      autoRegisterQuote(sess, reply).catch(e => console.error('견적 자동 등록 실패:', e.message));
+      autoRegisterQuote(sess, reply).catch(e => {
+        console.error('견적 자동 등록 실패:', e.message);
+        notifySlack('장애:DB', '💾', `[AUTO_QUOTE] session=${sess.id.slice(0, 8)} err=${e.message}`);
+      });
     }
 
     res.json({ message: reply });
@@ -1037,6 +1076,8 @@ app.post('/api/chat', chatRateLimit, async (req, res) => {
       sess.messages.push({ role: 'assistant', content: fallback });
       sess.lastActivity = new Date();
       sess.fallbackSent = true;
+      // Slack 알림 — 세션당 1회 (sess.fallbackSent 가드와 동일 조건)
+      notifySlack('장애:AI', '🚨', `session=${sess.id.slice(0, 8)} err=${err.message}`);
       return res.json({ message: fallback });
     }
     // 이미 fallback을 보낸 세션: 빈 응답 (클라이언트에서 무시)
@@ -1692,6 +1733,16 @@ app.post('/api/quote', chatRateLimit, async (req, res) => {
     if (error) throw error;
 
     console.log(`✅ 견적 폼 접수: ${payload.quote_number} (${payload.name})`);
+
+    // Slack 알림 — 폼 제출은 매 건마다 발사 (quote_number 매번 새로 발급)
+    {
+      const parts = [payload.quote_number];
+      if (payload.name)        parts.push(payload.name);
+      if (payload.region)      parts.push(payload.region);
+      if (payload.layout_type) parts.push(payload.layout_type);
+      if (payload.phone)       parts.push(payload.phone);
+      notifySlack('주문서:폼', '💰', parts.join(' / '));
+    }
 
     // customer 스키마 동시 저장 (phone 있을 때만)
     if (payload.phone) {
