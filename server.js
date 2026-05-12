@@ -851,10 +851,18 @@ app.post('/api/chat', chatRateLimit, async (req, res) => {
     // - 세션당 최초 1회 (대화 시작 시점)만 발사
     // - 마지막 메시지가 user 인 경우 = 신규 입력
     // - SLACK_WEBHOOK_URL 미설정 시 자동 off
-    // [DEBUG] 진단 로그 — 원인 파악 후 제거 예정
+    // [DEBUG] 진단 로그 + 응답 헤더 — 원인 파악 후 제거 예정
+    // console.error 사용 (cloudtype 가 stdout 만 누락시키는 경우 대비)
+    // 응답 헤더: 클라이언트 devtools 네트워크 탭에서 즉시 확인 가능
     {
       const _lastMsg = messages[messages.length - 1];
-      console.log(`[SLACK_TRACE] hasUrl=${!!process.env.SLACK_WEBHOOK_URL} notified=${!!sess.slackNotified} lastRole=${_lastMsg?.role} contentType=${typeof _lastMsg?.content} msgCount=${messages.length} session=${sessionId?.slice(0, 8)}`);
+      const _hasUrl = !!process.env.SLACK_WEBHOOK_URL;
+      const _notified = !!sess.slackNotified;
+      const _lastRole = _lastMsg?.role ?? 'none';
+      const _contentType = typeof _lastMsg?.content;
+      const traceStr = `hasUrl=${_hasUrl},notified=${_notified},lastRole=${_lastRole},contentType=${_contentType},msgCount=${messages.length},session=${sessionId?.slice(0, 8)}`;
+      console.error(`[SLACK_TRACE] ${traceStr}`);
+      try { res.setHeader('X-Slack-Trace', traceStr); } catch {}
     }
     if (process.env.SLACK_WEBHOOK_URL && !sess.slackNotified) {
       const lastMsg = messages[messages.length - 1];
@@ -864,7 +872,8 @@ app.post('/api/chat', chatRateLimit, async (req, res) => {
           ? lastMsg.content.slice(0, 200) + '…'
           : lastMsg.content;
         const label = sess.customerName || sessionId.slice(0, 8);
-        console.log(`[SLACK_FIRE] session=${sessionId.slice(0, 8)} label=${label}`);
+        console.error(`[SLACK_FIRE] session=${sessionId.slice(0, 8)} label=${label}`);
+        try { res.setHeader('X-Slack-Fire', '1'); } catch {}
         fetch(process.env.SLACK_WEBHOOK_URL, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -872,7 +881,7 @@ app.post('/api/chat', chatRateLimit, async (req, res) => {
             text: `🆕 신규 상담 | *${label}*\n${preview}`,
           }),
         })
-          .then(r => console.log(`[SLACK_RESP] status=${r.status} session=${sessionId.slice(0, 8)}`))
+          .then(r => console.error(`[SLACK_RESP] status=${r.status} session=${sessionId.slice(0, 8)}`))
           .catch(e => console.error('[SLACK_NOTIFY_FAIL]', e.message));
       }
     }
@@ -1782,4 +1791,6 @@ app.post('/api/summarize', async (req, res) => {
 app.listen(PORT, () => {
   console.log(`✅ 루마네 서버 실행 중: http://localhost:${PORT}`);
   console.log(`📱 채팅 화면: http://localhost:${PORT}/chat.html`);
+  // [DEBUG] 부팅 시 Slack 설정 상태 — stderr 로도 박아 로그 가시성 확보
+  console.error(`[BOOT] SLACK_WEBHOOK_URL set=${!!process.env.SLACK_WEBHOOK_URL} length=${(process.env.SLACK_WEBHOOK_URL||'').length}`);
 });
