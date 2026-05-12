@@ -259,10 +259,11 @@ async function autoRegisterQuote(sess, reply) {
   if (name && phone) {
     try {
       const now = new Date().toISOString();
-      await supabaseCustomer.from('customer').upsert(
-        { name, phone, last_changed_at: now },
+      const { error: custUpsertErr } = await supabaseCustomer.from('customer').upsert(
+        { name, phone, saved_at: now, last_changed_at: now },
         { onConflict: 'phone' }
       );
+      if (custUpsertErr) throw custUpsertErr;
       if (!sess.customerInstallSaved) {
         await supabaseCustomer.from('install').insert([{
           name,
@@ -1629,10 +1630,11 @@ app.post('/api/quote', chatRateLimit, async (req, res) => {
     if (payload.phone) {
       try {
         const now = new Date().toISOString();
-        await supabaseCustomer.from('customer').upsert(
-          { name: payload.name, phone: payload.phone, last_changed_at: now },
+        const { error: custUpsertErr } = await supabaseCustomer.from('customer').upsert(
+          { name: payload.name, phone: payload.phone, saved_at: now, last_changed_at: now },
           { onConflict: 'phone' }
         );
+        if (custUpsertErr) throw custUpsertErr;
         await supabaseCustomer.from('install').insert([{
           name:             payload.name,
           phone:            payload.phone,
