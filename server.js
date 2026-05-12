@@ -894,6 +894,28 @@ app.post('/api/chat', chatRateLimit, async (req, res) => {
       return res.json({ ok: true, synced: messages.length });
     }
 
+    // ── Slack 모니터 알림 (fire-and-forget, 모니터링 목적) ──
+    // - 세션당 최초 1회 (대화 시작 시점)만 발사
+    // - 마지막 메시지가 user 인 경우 = 신규 입력
+    // - SLACK_WEBHOOK_URL 미설정 시 자동 off
+    if (process.env.SLACK_WEBHOOK_URL && !sess.slackNotified) {
+      const lastMsg = messages[messages.length - 1];
+      if (lastMsg?.role === 'user' && typeof lastMsg.content === 'string') {
+        sess.slackNotified = true;
+        const preview = lastMsg.content.length > 200
+          ? lastMsg.content.slice(0, 200) + '…'
+          : lastMsg.content;
+        const label = sess.customerName || sessionId.slice(0, 8);
+        fetch(process.env.SLACK_WEBHOOK_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            text: `🆕 신규 상담 | *${label}*\n${preview}`,
+          }),
+        }).catch(e => console.error('[SLACK_NOTIFY_FAIL]', e.message));
+      }
+    }
+
     // admin 모드면 AI 응답 없이 대기 신호만 반환
     if (sess.mode === 'admin') {
       return res.json({ message: null, adminMode: true });
