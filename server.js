@@ -139,22 +139,6 @@ function requireAdmin(req, res, next) {
 // 모든 /api/admin/* 라우트에 인증 적용
 app.use('/api/admin', requireAdmin);
 
-// ── 어드민 행동 감사 로그 헬퍼 (실패해도 본 작업은 진행) ──
-async function logAdminAudit(req, action, target_table, target_id) {
-  try {
-    await supabase.from('admin_audit_log').insert({
-      action,
-      target_table,
-      target_id: target_id != null ? String(target_id) : null,
-      admin_name: (req.headers['x-admin-name'] || '').toString().slice(0, 50) || null,
-      admin_ip: req.ip || null,
-      admin_user_agent: (req.headers['user-agent'] || '').toString().slice(0, 500) || null,
-    });
-  } catch (err) {
-    console.error(`[FAIL_AUDIT] action=${action} target=${target_id} err=${err.message}`);
-  }
-}
-
 // ── 라이브 세션 관리 (메모리) ─────────────────────────────────
 // 서버 재시작 시 초기화됨. 필요 시 Supabase로 이전 가능.
 const SESSION_ID_RE = /^S-\d{13}-[a-z0-9]{5}$/;
@@ -1530,9 +1514,7 @@ app.delete('/api/admin/conversations/:id', requireAdmin, async (req, res) => {
       .update({ deleted_at: new Date().toISOString() })
       .eq('id', req.params.id);
     if (error) throw error;
-    await logAdminAudit(req, 'soft_delete_conversation', 'conversations', req.params.id);
-    const who = req.headers['x-admin-name'] || 'unknown';
-    console.log(`🗑 상담 soft-delete: id=${req.params.id} admin=${who}`);
+    console.log(`🗑 상담 soft-delete: id=${req.params.id}`);
     res.json({ ok: true });
   } catch (err) {
     console.error(`[FAIL_DELETE_CONV] id=${req.params.id} err=${err.message}`);
@@ -1555,9 +1537,7 @@ app.delete('/api/admin/sessions/:sessionId', requireAdmin, async (req, res) => {
     ]);
     if (r1.status === 'rejected' || r1.value?.error) console.warn('conversations soft-delete 경고:', r1.reason?.message || r1.value?.error?.message);
     if (r2.status === 'rejected' || r2.value?.error) console.warn('test_conversations soft-delete 경고:', r2.reason?.message || r2.value?.error?.message);
-    await logAdminAudit(req, 'soft_delete_session', 'sessions', sessionId);
-    const who = req.headers['x-admin-name'] || 'unknown';
-    console.log(`🗑 라이브 세션 soft-delete: ${sessionId} (memory=${existed}, admin=${who})`);
+    console.log(`🗑 라이브 세션 soft-delete: ${sessionId} (memory=${existed})`);
     res.json({ ok: true });
   } catch (err) {
     console.error(`[FAIL_DELETE_SESSION] id=${sessionId} err=${err.message}`);
