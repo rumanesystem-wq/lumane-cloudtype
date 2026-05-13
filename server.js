@@ -1372,7 +1372,7 @@ app.get('/api/admin/stats', async (_req, res) => {
 
     const { data, error } = await supabase
       .from('conversations')
-      .select('id, phone, started_at')
+      .select('id, phone, session_id, started_at')
       .is('deleted_at', null)
       .order('id', { ascending: true });
     if (error) throw error;
@@ -1389,6 +1389,34 @@ app.get('/api/admin/stats', async (_req, res) => {
 
     const inPeriod = (dt, from) => new Date(dt) >= from;
 
+    /* 오늘 방문자 통계 (visitor_logs 기반) — 피드백 반영 */
+    const todayKstStr = (() => {
+      const y = kstNow.getUTCFullYear();
+      const m = String(kstNow.getUTCMonth() + 1).padStart(2, '0');
+      const d = String(kstNow.getUTCDate()).padStart(2, '0');
+      return `${y}-${m}-${d}`;
+    })();
+    let visitorsToday = 0;
+    let engagedToday  = 0;
+    try {
+      const { data: vlData, error: vlErr } = await supabase
+        .from('visitor_logs')
+        .select('session_id')
+        .eq('visited_date', todayKstStr)
+        .limit(10000);
+      if (!vlErr && vlData) {
+        const uniqueVisitorIds = new Set(vlData.map(v => v.session_id).filter(Boolean));
+        visitorsToday = uniqueVisitorIds.size;
+        for (const r of rows) {
+          if (inPeriod(r.started_at, todayStart) && r.session_id && uniqueVisitorIds.has(r.session_id)) {
+            engagedToday++;
+          }
+        }
+      }
+    } catch (visitorErr) {
+      console.warn('[visit-stats] 집계 실패:', visitorErr.message);
+    }
+
     res.json({
       total:    rows.length,
       today:    rows.filter(r => inPeriod(r.started_at, todayStart)).length,
@@ -1397,6 +1425,8 @@ app.get('/api/admin/stats', async (_req, res) => {
       newToday: Object.values(firstSeen).filter(dt => dt >= todayStart).length,
       newWeek:  Object.values(firstSeen).filter(dt => dt >= weekStart).length,
       newMonth: Object.values(firstSeen).filter(dt => dt >= monthStart).length,
+      visitorsToday,
+      engagedToday,
     });
   } catch (err) {
     console.error('통계 조회 오류:', err.message);
