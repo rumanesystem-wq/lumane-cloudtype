@@ -562,22 +562,54 @@ const STORAGE_BUCKET = 'lumane-uploads';
   }
 })();
 
+// H2 fix: 업로드 보안 강화 — 확장자 화이트리스트 축소(이미지+PDF), 5MB 제한
 const uploadMw = multer({
   storage: multer.memoryStorage(),
-  limits:  { fileSize: 10 * 1024 * 1024 },
+  limits:  { fileSize: 5 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
-    const ok = /\.(jpe?g|png|gif|webp|pdf|mp4|webm|ogg|mov|mp3|wav|m4a|aac)$/i
-      .test(path.extname(file.originalname));
-    cb(ok ? null : new Error('지원하지 않는 형식'), ok);
+    const ok = /\.(jpe?g|png|webp|heic|heif|pdf)$/i.test(path.extname(file.originalname));
+    cb(ok ? null : new Error('지원하지 않는 형식 (이미지/PDF만 가능)'), ok);
   },
 });
 
-app.post('/api/upload', uploadMw.single('file'), async (req, res) => {
+// H2 fix: 업로드 rate limit — IP당 분당 5회
+const _uploadRate = new Map();
+function uploadRateLimit(req, res, next) {
+  const ip = req.ip || 'unknown';
+  const now = Date.now();
+  const arr = (_uploadRate.get(ip) || []).filter(t => now - t < 60_000);
+  if (arr.length >= 5) {
+    return res.status(429).json({ error: '업로드 요청이 너무 많습니다. 잠시 후 다시 시도해주세요.' });
+  }
+  arr.push(now);
+  _uploadRate.set(ip, arr);
+  if (_uploadRate.size > 200) {
+    for (const [k, v] of _uploadRate) {
+      if (v.length === 0 || now - v[v.length - 1] > 60_000) _uploadRate.delete(k);
+    }
+  }
+  next();
+}
+
+app.post('/api/upload', uploadRateLimit, uploadMw.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: '파일이 없습니다' });
+
+  // H2 fix: 인증 검증 — 어드민 토큰이 있으면 통과, 아니면 유효한 채팅 세션 필요
+  const auth = req.headers.authorization || '';
+  const isAdminCall = ADMIN_TOKEN && auth === `Bearer ${ADMIN_TOKEN}`;
+  if (!isAdminCall) {
+    const sessionId = req.body?.sessionId || req.body?.session_id;
+    if (!sessionId || typeof sessionId !== 'string' || sessionId.length < 8) {
+      return res.status(401).json({ error: '유효한 세션이 필요합니다' });
+    }
+    if (!sessions.has(sessionId)) {
+      return res.status(403).json({ error: '세션이 등록되지 않았습니다. 페이지를 새로고침해 주세요.' });
+    }
+  }
 
   const ext      = path.extname(req.file.originalname).toLowerCase();
   const filename = Date.now() + '-' + Math.random().toString(36).slice(2, 7) + ext;
-  const isImage  = /\.(jpe?g|png|gif|webp)$/i.test(ext);
+  const isImage  = /\.(jpe?g|png|webp|heic|heif)$/i.test(ext);
 
   try {
     const { error } = await supabase.storage
