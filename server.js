@@ -13,6 +13,7 @@ const Anthropic = require('@anthropic-ai/sdk');
 const { createClient } = require('@supabase/supabase-js');
 const { Client: NotionClient } = require('@notionhq/client');
 const multer = require('multer');
+const AdmZip = require('adm-zip');
 const fs   = require('fs');
 const path = require('path');
 const crypto = require('crypto');
@@ -200,6 +201,12 @@ function getOrCreateSession(sessionId) {
       customerTyping: false,  // 고객이 입력 중 여부
       fallbackSent: false,    // API 오류 fallback 메시지 이미 보냈는지
       tokens: { input: 0, output: 0, cacheWrite: 0, cacheRead: 0, turns: 0 },
+      // ── 재방문 컨텍스트 (Phase 2) ──
+      // isReturning: 직전 conversations에 같은 session_id 행이 있으면 true (probe 후 1회만)
+      // previousQuoteSummary: 직전 견적 요약 문자열 (형태/치수/색상/금액). 없으면 null
+      // previousQuoteInjected: 시스템 프롬프트에 1회 주입했는지 마커 (재주입 방지)
+      previousQuoteSummary:  null,
+      previousQuoteInjected: false,
     });
   }
   return sessions.get(sessionId);
@@ -987,17 +994,30 @@ app.post('/api/chat', chatRateLimit, async (req, res) => {
   // ts/mid 등 extra 필드 제거 + 긴 대화 자동 요약
   const apiMessages = await buildApiMessages(messages);
 
+  // ── 재방문 고객 직전 견적 1회 주입 ─────────────────────────
+  // 조건: 재방문 확정 + 직전 견적 요약 보유 + 아직 미주입
+  // 주입 위치: system 배열의 두 번째 블록 (캐시 분리 — 메인 프롬프트는 ephemeral 캐시 유지)
+  const systemBlocks = [
+    {
+      type: 'text',
+      text: getSystemPrompt(),
+      cache_control: { type: 'ephemeral' },  // 시스템 프롬프트 캐싱 (5분간 유지, 재사용 시 90% 절감)
+    },
+  ];
+  const sessRef = sessionId && sessions.has(sessionId) ? sessions.get(sessionId) : null;
+  if (sessRef && sessRef.isReturning === true && sessRef.previousQuoteInjected !== true && sessRef.previousQuoteSummary) {
+    systemBlocks.push({
+      type: 'text',
+      text: `\n[재방문 고객 컨텍스트]\n이 고객은 이전에 상담받은 이력이 있습니다. 직전 상담의 견적 요약은 다음과 같습니다:\n${sessRef.previousQuoteSummary}\n\n응대 시 주의:\n- 이 정보를 먼저 들이밀지 말 것. 고객이 직접 이전 상담 얘기를 꺼내거나 "지난번에..." 같은 단서를 줄 때만 자연스럽게 활용한다.\n- 이전 견적 금액·치수를 먼저 언급하지 말 것. 고객이 묻기 전까지는 모르는 척 진행한다.\n- 고객이 이전 상담을 분명히 언급하면 위 요약을 참고해서 구체적으로 안내한다.`,
+    });
+    sessRef.previousQuoteInjected = true;
+  }
+
   try {
     const response = await client.messages.create({
       model: 'claude-sonnet-4-6',
       max_tokens: 1024,
-      system: [
-        {
-          type: 'text',
-          text: getSystemPrompt(),
-          cache_control: { type: 'ephemeral' },  // 시스템 프롬프트 캐싱 (5분간 유지, 재사용 시 90% 절감)
-        },
-      ],
+      system: systemBlocks,
       messages: apiMessages,
     });
 
@@ -1102,19 +1122,58 @@ app.post('/api/session/register', async (req, res) => {
       if (error) console.warn('[visitor_logs] 저장 실패:', error.message);
     });
   }
-  // 재방문 여부 확인
-  if (sess.nickname && sess.isReturning === undefined) {
-    try {
-      const { count } = await supabase
-        .from('conversations')
-        .select('id', { count: 'exact', head: true })
-        .eq('customer_name', sess.nickname)
-        .is('deleted_at', null);
-      sess.isReturning = (count || 0) > 0;
-    } catch { sess.isReturning = false; }
+  // 재방문 여부 확인 + 직전 견적 요약 추출 (session_id 매칭)
+  if (sess.isReturning === undefined) {
+    await detectReturningCustomer(sess);
   }
   res.json({ ok: true });
 });
+
+// ── 재방문 감지 + 직전 견적 요약 추출 ─────────────────────────
+// session_id가 localStorage에 영구 저장되는 점을 이용해 동일 브라우저 재방문을 감지.
+// conversations 테이블은 session_id로 UPSERT되므로(onConflict: 'session_id'),
+// 같은 session_id의 이전 기록이 존재하면 = 재방문.
+// 닉네임 매칭은 사용하지 않음 (자동 부여 랜덤 닉네임 + 브라우저별 다름 → 무의미).
+// 테스트 세션·conversations 미가용 시 안전 스킵.
+async function detectReturningCustomer(sess) {
+  try {
+    if (sess.isTest) { sess.isReturning = false; return; }
+    if (!customerSchemaAvailable) { sess.isReturning = false; return; }
+    if (!sess.id) { sess.isReturning = false; return; }
+
+    // 이 session_id의 이전 기록 찾기
+    const { data, error } = await supabase
+      .from('conversations')
+      .select('session_id, layout, size_raw, frame_color, shelf_color, estimated_price, started_at')
+      .eq('session_id', sess.id)
+      .is('deleted_at', null)
+      .maybeSingle();
+
+    if (error) throw error;
+    if (!data) { sess.isReturning = false; return; }
+
+    sess.isReturning = true;
+
+    // 인젝션 방어: 자유 텍스트는 줄바꿈 제거 + 80자 제한, size_raw는 숫자/*만 추출
+    const sanitize = (s) => String(s).replace(/[\r\n]+/g, ' ').slice(0, 80);
+    const sanitizeSize = (s) => (String(s).match(/[\d*\sx×]+/g) || []).join(' ').replace(/\s+/g, ' ').trim().slice(0, 40);
+
+    // 견적 요약 문자열 (enum/숫자 필드 위주, 화이트리스트)
+    const parts = [];
+    if (data.layout)        parts.push(`형태 ${sanitize(data.layout)}`);
+    if (data.size_raw)      parts.push(`치수 ${sanitizeSize(data.size_raw)}`);
+    if (data.frame_color)   parts.push(`프레임 ${sanitize(data.frame_color)}`);
+    if (data.shelf_color)   parts.push(`선반 ${sanitize(data.shelf_color)}`);
+    if (data.estimated_price && Number.isFinite(Number(data.estimated_price))) {
+      parts.push(`견적 ${Number(data.estimated_price).toLocaleString()}원`);
+    }
+
+    sess.previousQuoteSummary = parts.length > 0 ? parts.join(' · ') : null;
+  } catch (err) {
+    console.warn('[detectReturningCustomer] 실패:', err.message);
+    sess.isReturning = false;
+  }
+}
 
 // ── 어드민: 유입 소스 통계 ────────────────────────────────
 const _sourceStatsCache = new Map(); // period -> { payload, expiresAt }
@@ -1495,7 +1554,7 @@ app.get('/api/admin/conversations/:id', async (req, res) => {
       .select('*')
       .eq('id', req.params.id)
       .is('deleted_at', null)
-      .single();
+      .maybeSingle();
     if (error) throw error;
     if (!data) return res.status(404).json({ error: '삭제된 상담이거나 존재하지 않습니다' });
     res.json({ conversation: data });
@@ -1553,7 +1612,7 @@ app.post('/api/admin/conversations/:id/register-quote', requireAdmin, async (req
       .select('*')
       .eq('id', req.params.id)
       .is('deleted_at', null)
-      .single();
+      .maybeSingle();
     if (error) throw error;
     if (!c) return res.status(404).json({ error: '삭제된 상담이거나 존재하지 않습니다' });
 
@@ -1589,6 +1648,138 @@ app.post('/api/admin/conversations/:id/register-quote', requireAdmin, async (req
 });
 
 // (삭제: /api/admin/conversations/:id/reparse — 어드민 UI에서 재파싱 버튼 제거 후 잔재, 클라이언트 호출처 0건)
+
+// ── 어드민: 데이터 백업 (CSV / ZIP) ──────────────────────────
+// 화이트리스트: 백업 가능한 테이블 (Phase 2 — customer/install 제외)
+const BACKUP_TABLES = ['conversations', 'test_conversations', 'quotes'];
+
+// 메모리 기반 분당 1회 rate limit (IP별)
+const _backupLastTs = new Map();
+function backupRateLimit(req, res, next) {
+  const ip = req.ip || 'unknown';
+  const now = Date.now();
+  const last = _backupLastTs.get(ip) || 0;
+  if (now - last < 60_000) {
+    const retryAfter = Math.ceil((60_000 - (now - last)) / 1000);
+    res.set('Retry-After', String(retryAfter));
+    return res.status(429).json({ error: '1분에 한 번만 다운로드 가능합니다. 잠시 후 다시 시도해 주세요.' });
+  }
+  _backupLastTs.set(ip, now);
+  // 메모리 정리 (10분 이상 된 항목 제거)
+  if (_backupLastTs.size > 100) {
+    for (const [k, v] of _backupLastTs.entries()) {
+      if (now - v > 600_000) _backupLastTs.delete(k);
+    }
+  }
+  next();
+}
+
+// CSV 변환 헬퍼 (UTF-8 BOM + CRLF + 이스케이프)
+function toCsv(rows) {
+  if (!rows || rows.length === 0) return '﻿';
+  const headers = Object.keys(rows[0]);
+  const escape = (v) => {
+    if (v === null || v === undefined) return '';
+    let s = (typeof v === 'object') ? JSON.stringify(v) : String(v);
+    // CSV injection 방어: 수식 트리거 문자로 시작하면 앞에 작은따옴표
+    if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
+    if (/[",\r\n]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
+    return s;
+  };
+  const lines = [headers.join(',')];
+  for (const r of rows) {
+    lines.push(headers.map(h => escape(r[h])).join(','));
+  }
+  return '﻿' + lines.join('\r\n');
+}
+
+// 테이블 전체 SELECT (soft-delete 행 포함 — 별도 필터 없이 그대로)
+async function fetchTableAll(table) {
+  const { data, error } = await supabase.from(table).select('*');
+  if (error) throw new Error(`${table}: ${error.message}`);
+  return data || [];
+}
+
+// 파일명용 타임스탬프 (YYYY-MM-DD-HHmm, KST)
+function backupTimestamp() {
+  const now = new Date();
+  // KST = UTC+9
+  const kst = new Date(now.getTime() + 9 * 3600 * 1000);
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${kst.getUTCFullYear()}-${pad(kst.getUTCMonth() + 1)}-${pad(kst.getUTCDate())}-${pad(kst.getUTCHours())}${pad(kst.getUTCMinutes())}`;
+}
+
+// 한글 파일명 매핑
+const TABLE_FILE_KO = {
+  conversations: '상담기록',
+  test_conversations: '테스트상담',
+  quotes: '견적',
+};
+
+// 전체 ZIP 다운로드
+app.get('/api/admin/export', requireAdmin, backupRateLimit, async (req, res) => {
+  try {
+    const ts = backupTimestamp();
+    const zip = new AdmZip();
+    const counts = {};
+    for (const table of BACKUP_TABLES) {
+      const rows = await fetchTableAll(table);
+      counts[table] = rows.length;
+      const csv = toCsv(rows);
+      const ko = TABLE_FILE_KO[table] || table;
+      zip.addFile(`${ko}.csv`, Buffer.from(csv, 'utf8'));
+    }
+    const manifestLines = [
+      `루마네 데이터 백업`,
+      `생성 시각: ${new Date().toISOString()}`,
+      `생성 시각(KST): ${ts}`,
+      ``,
+      `포함 테이블 (행수):`,
+      ...BACKUP_TABLES.map(t => `  - ${TABLE_FILE_KO[t]} (${t}): ${counts[t]}행`),
+      ``,
+      `※ soft-delete된 행도 포함되어 있습니다.`,
+    ];
+    zip.addFile('_manifest.txt', Buffer.from('﻿' + manifestLines.join('\r\n'), 'utf8'));
+
+    const buf = zip.toBuffer();
+    res.set({
+      'Content-Type': 'application/zip',
+      'Content-Disposition': `attachment; filename="lumane-backup-${ts}.zip"`,
+      'Cache-Control': 'no-store',
+      'X-Content-Type-Options': 'nosniff',
+    });
+    res.send(buf);
+    console.log(`📦 전체 백업 다운로드: ${ts} (${Object.entries(counts).map(([k,v]) => `${k}=${v}`).join(', ')})`);
+  } catch (err) {
+    console.error('백업(ZIP) 오류:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 단일 테이블 CSV 다운로드
+app.get('/api/admin/export/:table', requireAdmin, backupRateLimit, async (req, res) => {
+  const table = req.params.table;
+  if (!BACKUP_TABLES.includes(table)) {
+    return res.status(400).json({ error: '지원하지 않는 테이블입니다.' });
+  }
+  try {
+    const rows = await fetchTableAll(table);
+    const csv = toCsv(rows);
+    const ts = backupTimestamp();
+    const ko = TABLE_FILE_KO[table] || table;
+    res.set({
+      'Content-Type': 'text/csv; charset=utf-8',
+      'Content-Disposition': `attachment; filename="${encodeURIComponent(ko)}-${ts}.csv"`,
+      'Cache-Control': 'no-store',
+      'X-Content-Type-Options': 'nosniff',
+    });
+    res.send(csv);
+    console.log(`📄 단일 CSV 다운로드: ${table} (${rows.length}행)`);
+  } catch (err) {
+    console.error('백업(CSV) 오류:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // ── 어드민: 대화 수동 저장 ────────────────────────────────────
 app.post('/api/admin/save-conversation', async (req, res) => {
@@ -1969,8 +2160,28 @@ app.post('/api/summarize', async (req, res) => {
   }
 });
 
+// ── customer 스키마 probe (재방문 감지에 필요한 컬럼 존재 여부) ──
+// conversations 테이블에 customer_name 컬럼이 있는지 1회 확인.
+// 없으면 detectReturningCustomer는 즉시 스킵 (안전 fallback).
+let customerSchemaAvailable = false;
+async function probeCustomerSchema() {
+  try {
+    const { error } = await supabase
+      .from('conversations')
+      .select('customer_name', { head: true, count: 'exact' })
+      .limit(1);
+    if (error) throw error;
+    customerSchemaAvailable = true;
+    console.log('✅ conversations.customer_name 스키마 사용 가능 — 재방문 감지 활성');
+  } catch (err) {
+    customerSchemaAvailable = false;
+    console.warn('⚠️ conversations.customer_name 스키마 사용 불가 — 재방문 감지 비활성:', err.message);
+  }
+}
+
 // ── 서버 시작 ─────────────────────────────────────────────────
 app.listen(PORT, () => {
   console.log(`✅ 루마네 서버 실행 중: http://localhost:${PORT}`);
   console.log(`📱 채팅 화면: http://localhost:${PORT}/chat.html`);
+  probeCustomerSchema();
 });
