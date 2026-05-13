@@ -64,6 +64,10 @@ function getSystemPrompt() {
 ${mdContents}`;
 }
 
+// ── 프록시 환경에서 req.ip 정확히 읽기 (Render/cloudtype 등) ──
+// H1 fix: 단일 프록시 환경 가정. X-Forwarded-For 첫 번째 값을 req.ip로 사용.
+app.set('trust proxy', 1);
+
 // ── 미들웨어 ──────────────────────────────────────────────────
 app.use(cors({
   origin: [
@@ -179,6 +183,32 @@ async function addTokenUsage(sessionId, usage) {
 //   pendingAdminMsgs: [], customerName: null,
 //   startedAt: Date, lastActivity: Date
 // }>
+
+// H4 fix: 어드민이 즉시 삭제한 sessionId 1시간 blocklist
+//   - 같은 session_id로 새 채팅 시도 시 거부 → 메모리/DB 부활 방지
+//   - 1시간 후 만료 (메모리 누수 방지)
+const _deletedSessionBlocklist = new Map(); // sessionId -> expireAt(ms)
+const BLOCKLIST_TTL = 60 * 60 * 1000; // 1시간
+function markSessionDeleted(sessionId) {
+  if (!sessionId) return;
+  _deletedSessionBlocklist.set(sessionId, Date.now() + BLOCKLIST_TTL);
+  if (_deletedSessionBlocklist.size > 100) {
+    const now = Date.now();
+    for (const [id, exp] of _deletedSessionBlocklist) {
+      if (exp < now) _deletedSessionBlocklist.delete(id);
+    }
+  }
+}
+function isSessionBlocked(sessionId) {
+  if (!sessionId) return false;
+  const exp = _deletedSessionBlocklist.get(sessionId);
+  if (!exp) return false;
+  if (exp < Date.now()) {
+    _deletedSessionBlocklist.delete(sessionId);
+    return false;
+  }
+  return true;
+}
 
 function getOrCreateSession(sessionId) {
   if (!sessions.has(sessionId)) {
@@ -422,12 +452,24 @@ async function saveConversation(sess, reason) {
 }
 
 // 30분 이상 비활성 세션 정리 (메모리 관리) — 만료 전 대화 자동 저장
+// H3 fix: cleanup 도중 사용자 활동 시 race condition 방지
+//   - cleanup 시작 시 lastActivity 시점 기록
+//   - save 끝난 후 lastActivity 다시 확인 → 그동안 새 활동 있었으면 삭제 스킵 (세션 살림)
 setInterval(async () => {
+  const THRESHOLD = 30 * 60 * 1000;
   const now = Date.now();
   for (const [id, sess] of sessions) {
-    if (now - sess.lastActivity > 30 * 60 * 1000) {
-      await saveConversation(sess, 'expired');
-      sessions.delete(id);
+    if (now - sess.lastActivity > THRESHOLD) {
+      const snapshotActivity = sess.lastActivity;
+      try {
+        await saveConversation(sess, 'expired');
+      } catch (e) {
+        console.warn('[cleanup save 실패] session=' + id + ' err=' + e.message);
+      }
+      // save 도중 새 활동이 있었으면 (lastActivity 갱신됨) 세션 유지
+      if (sess.lastActivity === snapshotActivity) {
+        sessions.delete(id);
+      }
     }
   }
 }, 5 * 60 * 1000);
@@ -889,6 +931,11 @@ app.post('/api/chat', chatRateLimit, async (req, res) => {
     return res.status(400).json({ error: 'messages 배열이 필요합니다.' });
   }
 
+  // H4 fix: 어드민이 삭제한 sessionId는 1시간 내 채팅 차단
+  if (sessionId && isSessionBlocked(sessionId)) {
+    return res.status(410).json({ error: '이 세션은 종료되었습니다.' });
+  }
+
   // messages 항목 검증 (role·content 형식)
   const validMessages = messages.every(m =>
     VALID_ROLES.has(m.role) &&
@@ -1023,8 +1070,10 @@ app.post('/api/chat', chatRateLimit, async (req, res) => {
 
     const reply = response.content[0].text;
 
-    // 토큰 사용량 기록
-    addTokenUsage(sessionId, response.usage);
+    // 토큰 사용량 기록 (fire-and-forget — unhandled rejection 방지 catch)
+    addTokenUsage(sessionId, response.usage).catch(err =>
+      console.warn('[FAIL_TOKEN_USAGE] session=' + sessionId + ' err=' + err.message)
+    );
 
     // 세션에 AI 응답 저장 + 실시간 Supabase upsert
     if (sessionId && sessions.has(sessionId)) {
@@ -1097,6 +1146,10 @@ app.post('/api/session/register', async (req, res) => {
   const { sessionId, nickname, isTest, src, src2 } = req.body;
   if (!sessionId || !SESSION_ID_RE.test(sessionId)) {
     return res.status(400).json({ error: '유효하지 않은 sessionId' });
+  }
+  // H4 fix: 어드민이 삭제한 sessionId는 1시간 내 재접속 차단
+  if (isSessionBlocked(sessionId)) {
+    return res.status(410).json({ error: '이 세션은 어드민에 의해 종료되었습니다. 새 세션으로 다시 시도하세요.' });
   }
   const sess = getOrCreateSession(sessionId);
   if (nickname && typeof nickname === 'string') {
@@ -1656,6 +1709,8 @@ app.delete('/api/admin/sessions/:sessionId', requireAdmin, async (req, res) => {
   try {
     // 메모리 세션은 제거 (어차피 휘발성, soft-delete 의미 없음)
     const existed = sessions.delete(sessionId);
+    // H4 fix: blocklist에 등록 — 같은 sessionId로 1시간 내 재접속 차단
+    markSessionDeleted(sessionId);
     // DB는 soft-delete (양 테이블 병렬)
     const nowIso = new Date().toISOString();
     const [r1, r2] = await Promise.allSettled([
