@@ -159,7 +159,7 @@ function showStatDay(date) {
     return;
   }
   body.innerHTML = list.map(s => `
-    <div onclick="openHistoryDetail('${escAttr(String(s.id))}')"
+    <div onclick="openHistoryDetail('${escAttr(String(s.id))}', ${s.is_test ? 1 : 0})"
       style="display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:12px;background:#f9fafb;margin-bottom:8px;border:1px solid #f3f4f6;cursor:pointer;transition:background .15s;"
       onmouseover="this.style.background='#f3f4f6'" onmouseout="this.style.background='#f9fafb'">
       <div style="font-size:12px;color:#9ca3af;width:36px;flex-shrink:0;">${toKSTTime(s.started_at)}</div>
@@ -310,7 +310,7 @@ function openWeekDetail(weekLabel) {
       <div style="flex:1;height:1px;background:#e5e7eb;"></div>
     </div>`;
     const rows = list.map(s => `
-      <div onclick="openHistoryDetail('${escAttr(String(s.id))}')"
+      <div onclick="openHistoryDetail('${escAttr(String(s.id))}', ${s.is_test ? 1 : 0})"
         style="display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:12px;background:#f9fafb;margin-bottom:8px;border:1px solid #f3f4f6;cursor:pointer;transition:background .15s;"
         onmouseover="this.style.background='#f3f4f6'" onmouseout="this.style.background='#f9fafb'">
         <div style="font-size:12px;color:#9ca3af;width:36px;flex-shrink:0;">${toKSTTime(s.started_at)}</div>
@@ -699,15 +699,13 @@ function switchTab(tab) {
   } else if (tab === 'trash') {
     document.getElementById('topbarTitle').textContent = '🗑 휴지통';
     if (typeof loadTrash === 'function') loadTrash();
-  } else if (tab === 'backup') {
-    document.getElementById('topbarTitle').textContent = '📦 백업';
-    if (window.lumaneBackup && typeof window.lumaneBackup.renderBackupTab === 'function') {
-      window.lumaneBackup.renderBackupTab();
-    } else if (typeof renderBackupTab === 'function') {
-      renderBackupTab();
-    }
   } else if (tab === 'stat-detail') {
     document.getElementById('topbarTitle').textContent = '📊 상담 현황';
+  } else if (tab === 'backup') {
+    document.getElementById('topbarTitle').textContent = '📦 백업';
+    if (window.lumaneBackup && typeof lumaneBackup.renderBackupTab === 'function') {
+      lumaneBackup.renderBackupTab();
+    }
   } else if (tab === 'history') {
     document.getElementById('topbarTitle').textContent = '🗂️ 저장된 상담';
     updateHistoryBadge(0);
@@ -881,7 +879,7 @@ function renderHistoryList(list) {
     <div style="background:#fff;border:1px solid #e5e7eb;border-left:4px solid ${borderColor};border-radius:12px;padding:14px 18px;transition:box-shadow .15s;display:grid;grid-template-columns:1fr auto;gap:6px 12px;align-items:center;"
       onmouseover="this.style.boxShadow='0 2px 12px rgba(0,0,0,.08)'"
       onmouseout="this.style.boxShadow='none'">
-      <div onclick="if(window.markSessionSeen)markSessionSeen('${escAttr(c.id)}');openHistoryDetail('${escAttr(c.id)}')" style="cursor:pointer;">
+      <div onclick="if(window.markSessionSeen)markSessionSeen('${escAttr(c.id)}');openHistoryDetail('${escAttr(c.id)}', ${c.is_test ? 1 : 0})" style="cursor:pointer;">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
           <span style="font-size:15px;font-weight:700;">${escAdmin(getConvLabel(c))}</span>
           ${badge(c.save_reason)}
@@ -898,7 +896,7 @@ function renderHistoryList(list) {
       <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;flex-shrink:0;">
         <div style="font-size:14px;font-weight:700;color:#c9a96e;">${fmt(c.estimated_price)}</div>
         <div style="font-size:11px;color:#9ca3af;">${savedAt}</div>
-        <button onclick="deleteConversationById('${escAttr(c.id)}')"
+        <button onclick="deleteConversationById('${escAttr(c.id)}', ${c.is_test ? 1 : 0})"
           style="background:#ef4444;color:#fff;border:none;border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer;white-space:nowrap;">🗑 삭제</button>
       </div>
     </div>`;
@@ -907,9 +905,11 @@ function renderHistoryList(list) {
 
 let _currentHistoryId = null;
 let _currentHdSessionId = null;
+let _currentHistoryIsTest = false;
 
-async function openHistoryDetail(id) {
+async function openHistoryDetail(id, isTest) {
   _currentHistoryId = id;
+  _currentHistoryIsTest = !!isTest;
   _currentHdSessionId = null;
   const overlay = document.getElementById('historyDetailOverlay');
   overlay.style.display = 'flex';
@@ -920,7 +920,8 @@ async function openHistoryDetail(id) {
   document.getElementById('hdReplyInput').value = '';
   document.getElementById('hdReplyArea').style.display = 'none';
   try {
-    const res = await fetch(`${SERVER}/api/admin/conversations/${encodeURIComponent(id)}`, { headers: adminHeaders() });
+    const qs = _currentHistoryIsTest ? '?test=1' : '';
+    const res = await fetch(`${SERVER}/api/admin/conversations/${encodeURIComponent(id)}${qs}`, { headers: adminHeaders() });
     if (!res.ok) throw new Error();
     const { conversation: c } = await res.json();
     if (c.session_id) {
@@ -1003,12 +1004,14 @@ function closeHistoryDetail(e) {
   document.getElementById('historyDetailOverlay').style.display = 'none';
   _currentHistoryId = null;
   _currentHdSessionId = null;
+  _currentHistoryIsTest = false;
 }
 
-async function deleteConversationById(id) {
+async function deleteConversationById(id, isTest) {
   if (!confirm('이 상담 기록을 삭제하시겠습니까? 복구할 수 없습니다.')) return;
   try {
-    const res = await fetch(`${SERVER}/api/admin/conversations/${encodeURIComponent(id)}`, {
+    const qs = isTest ? '?test=1' : '';
+    const res = await fetch(`${SERVER}/api/admin/conversations/${encodeURIComponent(id)}${qs}`, {
       method: 'DELETE', headers: adminHeaders(),
     });
     if (!res.ok) { const d = await res.json(); throw new Error(d.error || res.status); }
@@ -1026,7 +1029,8 @@ async function deleteConversation() {
   btn.textContent = '삭제 중…';
   btn.disabled = true;
   try {
-    const res = await fetch(`${SERVER}/api/admin/conversations/${encodeURIComponent(_currentHistoryId)}`, {
+    const qs = _currentHistoryIsTest ? '?test=1' : '';
+    const res = await fetch(`${SERVER}/api/admin/conversations/${encodeURIComponent(_currentHistoryId)}${qs}`, {
       method: 'DELETE', headers: adminHeaders(),
     });
     if (!res.ok) { const d = await res.json(); throw new Error(d.error || res.status); }
@@ -1046,7 +1050,8 @@ async function registerQuoteFromConversation() {
   btn.textContent = '등록 중…';
   btn.disabled = true;
   try {
-    const res = await fetch(`${SERVER}/api/admin/conversations/${encodeURIComponent(_currentHistoryId)}/register-quote`, {
+    const qs = _currentHistoryIsTest ? '?test=1' : '';
+    const res = await fetch(`${SERVER}/api/admin/conversations/${encodeURIComponent(_currentHistoryId)}/register-quote${qs}`, {
       method: 'POST', headers: adminHeaders(),
     });
     if (!res.ok) { const d = await res.json(); throw new Error(d.error || res.status); }
