@@ -684,6 +684,13 @@ function switchTab(tab) {
   } else if (tab === 'tokens') {
     document.getElementById('topbarTitle').textContent = '🪙 토큰 사용량';
     loadTokenStats();
+  } else if (tab === 'backup') {
+    document.getElementById('topbarTitle').textContent = '📦 백업';
+    if (window.lumaneBackup && typeof window.lumaneBackup.renderBackupTab === 'function') {
+      window.lumaneBackup.renderBackupTab();
+    } else if (typeof renderBackupTab === 'function') {
+      renderBackupTab();
+    }
   } else if (tab === 'stat-detail') {
     document.getElementById('topbarTitle').textContent = '📊 상담 현황';
   } else if (tab === 'history') {
