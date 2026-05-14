@@ -1008,6 +1008,15 @@ app.post('/api/chat', chatRateLimit, async (req, res) => {
 
     // admin 모드면 AI 응답 없이 대기 신호만 반환
     if (sess.mode === 'admin') {
+      // user 메시지를 DB 에 즉시 보존 (fire-and-forget, 재시도 + Slack 알림)
+      // — admin 모드는 AI 응답 경로의 upsertConversation 을 안 거치므로 여기서 명시적으로 저장
+      upsertConversation(sess).catch(e => {
+        console.error(`[FAIL_ADMIN_USER_SAVE_1] session=${sess.id} err=${e.message}`);
+        setTimeout(() => upsertConversation(sess).catch(e2 => {
+          console.error(`[FAIL_ADMIN_USER_SAVE_2] session=${sess.id} err=${e2.message}`);
+          notifySlack('DB저장실패', '💾', `ctx=ADMIN_USER session=${sess.id.slice(0, 8)}\nname=${e2.name || '?'} code=${e2.code || '?'}\nerr=${e2.message}`);
+        }), 2000);
+      });
       return res.json({ message: null, adminMode: true });
     }
   }
@@ -1618,6 +1627,16 @@ app.post('/api/admin/message', (req, res) => {
   sess.messages.push(msg);
   sess.lastActivity = new Date();
   sess.lastMessageAt = new Date();
+
+  // 어드민 답변을 DB 에 즉시 보존 (fire-and-forget, 재시도 + Slack 알림)
+  // — admin 모드는 /api/chat 의 upsertConversation 을 안 거치므로 여기서 명시적으로 저장
+  upsertConversation(sess).catch(e => {
+    console.error(`[FAIL_ADMIN_REPLY_SAVE_1] session=${sess.id} err=${e.message}`);
+    setTimeout(() => upsertConversation(sess).catch(e2 => {
+      console.error(`[FAIL_ADMIN_REPLY_SAVE_2] session=${sess.id} err=${e2.message}`);
+      notifySlack('DB저장실패', '💾', `ctx=ADMIN_REPLY session=${sess.id.slice(0, 8)}\nname=${e2.name || '?'} code=${e2.code || '?'}\nerr=${e2.message}`);
+    }), 2000);
+  });
 
   res.json({ ok: true });
 });
