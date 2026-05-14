@@ -84,9 +84,12 @@ app.use(express.json({ limit: '10mb' })); // M1 fix: 견적 폼 사진(base64) �
 const SLACK_SERVICE = 'lumane-chatbot';
 // AI 제공자 — 모델 교체 시 env 한 줄만 바꾸면 알림 메시지가 자동 반영
 const AI_PROVIDER = process.env.AI_PROVIDER || 'anthropic';
+// 어드민 페이지 URL — 알림 본문 끝에 링크 한 줄 부착. 미설정 시 링크 생략 (무해 fallback)
+const ADMIN_URL = process.env.ADMIN_URL || '';
 function notifySlack(event, emoji, body) {
   if (!process.env.SLACK_WEBHOOK_URL) return;
-  const text = `${emoji} *${event}* [${SLACK_SERVICE}]\n${body}`;
+  const link = ADMIN_URL ? `\n<${ADMIN_URL}|어드민 바로가기>` : '';
+  const text = `${emoji} *${event}* [${SLACK_SERVICE}]\n${body}${link}`;
   fetch(process.env.SLACK_WEBHOOK_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -986,6 +989,22 @@ app.post('/api/chat', chatRateLimit, async (req, res) => {
     }
 
     const sess = getOrCreateSession(sessionId);
+
+    // fromAdmin 플래그 보존 — 클라가 fromAdmin/time 을 누락한 채 messages 를 보내도
+    // 서버 sess.messages 에 박혀 있던 fromAdmin: true 메타를 동일 content 매칭으로 복원.
+    // (구버전 클라/라운드트립 누락 방어 — 어드민 메시지 식별성 영구 손실 방지)
+    const serverAdminMsgs = (sess.messages || []).filter(m => m.fromAdmin && m.role === 'assistant');
+    if (serverAdminMsgs.length > 0) {
+      const remaining = [...serverAdminMsgs];
+      messages = messages.map(m => {
+        if (m.fromAdmin || m.role !== 'assistant') return m;
+        const idx = remaining.findIndex(s => s.content === m.content);
+        if (idx === -1) return m;
+        const matched = remaining.splice(idx, 1)[0];
+        return { ...m, fromAdmin: true, time: m.time || matched.time };
+      });
+    }
+
     sess.messages = messages;
     sess.lastActivity = new Date();
     if (!syncOnly) sess.lastMessageAt = new Date();
@@ -1040,6 +1059,15 @@ app.post('/api/chat', chatRateLimit, async (req, res) => {
 
     // admin 모드면 AI 응답 없이 대기 신호만 반환
     if (sess.mode === 'admin') {
+      // user 메시지를 DB 에 즉시 보존 (fire-and-forget, 재시도 + Slack 알림)
+      // — admin 모드는 AI 응답 경로의 upsertConversation 을 안 거치므로 여기서 명시적으로 저장
+      upsertConversation(sess).catch(e => {
+        console.error(`[FAIL_ADMIN_USER_SAVE_1] session=${sess.id} err=${e.message}`);
+        setTimeout(() => upsertConversation(sess).catch(e2 => {
+          console.error(`[FAIL_ADMIN_USER_SAVE_2] session=${sess.id} err=${e2.message}`);
+          notifySlack('DB저장실패', '💾', `ctx=ADMIN_USER session=${sess.id.slice(0, 8)}\nname=${e2.name || '?'} code=${e2.code || '?'}\nerr=${e2.message}`);
+        }), 2000);
+      });
       return res.json({ message: null, adminMode: true });
     }
   }
@@ -1650,6 +1678,16 @@ app.post('/api/admin/message', (req, res) => {
   sess.messages.push(msg);
   sess.lastActivity = new Date();
   sess.lastMessageAt = new Date();
+
+  // 어드민 답변을 DB 에 즉시 보존 (fire-and-forget, 재시도 + Slack 알림)
+  // — admin 모드는 /api/chat 의 upsertConversation 을 안 거치므로 여기서 명시적으로 저장
+  upsertConversation(sess).catch(e => {
+    console.error(`[FAIL_ADMIN_REPLY_SAVE_1] session=${sess.id} err=${e.message}`);
+    setTimeout(() => upsertConversation(sess).catch(e2 => {
+      console.error(`[FAIL_ADMIN_REPLY_SAVE_2] session=${sess.id} err=${e2.message}`);
+      notifySlack('DB저장실패', '💾', `ctx=ADMIN_REPLY session=${sess.id.slice(0, 8)}\nname=${e2.name || '?'} code=${e2.code || '?'}\nerr=${e2.message}`);
+    }), 2000);
+  });
 
   res.json({ ok: true });
 });

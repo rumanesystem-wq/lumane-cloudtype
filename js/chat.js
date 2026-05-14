@@ -96,6 +96,8 @@ function saveHistory() {
   try {
     localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
     localStorage.setItem(HISTORY_TS_KEY, String(Date.now()));
+    // SESSION_KEY 안전망 — 누락 시 현재 SESSION_ID 로 복원
+    if (SESSION_ID) localStorage.setItem(SESSION_KEY, SESSION_ID);
   } catch { /* 무시 */ }
 }
 
@@ -135,7 +137,7 @@ function archiveCurrent() {
 function clearHistory() {
   localStorage.removeItem(HISTORY_KEY);
   localStorage.removeItem(HISTORY_TS_KEY);
-  localStorage.removeItem('루마네_세션ID');
+  // SESSION_KEY 는 여기서 삭제하지 않음 — newChat() 이 generateSessionId() 로 명시적 교체
 }
 
 /* ── Admin 난입 상태 ── */
@@ -253,8 +255,15 @@ function startPolling() {
       /* admin이 보낸 메시지 표시 */
       for (const msg of (data.pendingMsgs || [])) {
         hideAdminTyping();
-        addMsg('bot', msg.content);
-        history.push({ role: 'assistant', content: msg.content, ts: new Date().toISOString() });
+        addMsg('bot', msg.content, { fromAdmin: true });
+        // fromAdmin/time 메타 보존 — 다음 syncOnly 라운드트립에서도 어드민 식별성 유지
+        history.push({
+          role: 'assistant',
+          content: msg.content,
+          fromAdmin: true,
+          time: msg.time,
+          ts: msg.time || new Date().toISOString(),
+        });
         // 탭이 백그라운드일 때 브라우저 알림
         if (document.visibilityState !== 'visible' && Notification.permission === 'granted') {
           new Notification('👩‍💼 담당자 메시지', {
@@ -830,8 +839,9 @@ async function startChat() {
           addMsg(m.role === 'assistant' ? 'bot' : 'user', m.content, {
             mid: m.mid,
             replyTo: m.replyTo ?? null,
-            time: m.ts || null,
+            time: m.ts || m.time || null,
             skipQuoteImage: true,
+            fromAdmin: !!m.fromAdmin,
           });
         }
       } catch (e) {
@@ -908,8 +918,10 @@ async function startUpdateChecker() {
       if (!r.ok) return;
       const { v } = await r.json();
       if (_deployedVersion && v !== _deployedVersion) {
-        // 새 배포 감지 → 캐시 무시하고 새로고침
-        location.reload(true);
+        // 새 배포 감지 → 강제 새로고침 대신 배너 안내 (세션 분리 방지)
+        setBanner('warn', '✨ 새 버전이 배포되었어요. 대화가 끝난 후 새로고침해 주세요.');
+        clearInterval(updateTimer);
+        updateTimer = null;
       }
     } catch { /* 무시 */ }
   }, 30000);
