@@ -954,6 +954,22 @@ app.post('/api/chat', chatRateLimit, async (req, res) => {
     }
 
     const sess = getOrCreateSession(sessionId);
+
+    // fromAdmin 플래그 보존 — 클라가 fromAdmin/time 을 누락한 채 messages 를 보내도
+    // 서버 sess.messages 에 박혀 있던 fromAdmin: true 메타를 동일 content 매칭으로 복원.
+    // (구버전 클라/라운드트립 누락 방어 — 어드민 메시지 식별성 영구 손실 방지)
+    const serverAdminMsgs = (sess.messages || []).filter(m => m.fromAdmin && m.role === 'assistant');
+    if (serverAdminMsgs.length > 0) {
+      const remaining = [...serverAdminMsgs];
+      messages = messages.map(m => {
+        if (m.fromAdmin || m.role !== 'assistant') return m;
+        const idx = remaining.findIndex(s => s.content === m.content);
+        if (idx === -1) return m;
+        const matched = remaining.splice(idx, 1)[0];
+        return { ...m, fromAdmin: true, time: m.time || matched.time };
+      });
+    }
+
     sess.messages = messages;
     sess.lastActivity = new Date();
     if (!syncOnly) sess.lastMessageAt = new Date();

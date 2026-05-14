@@ -253,8 +253,15 @@ function startPolling() {
       /* admin이 보낸 메시지 표시 */
       for (const msg of (data.pendingMsgs || [])) {
         hideAdminTyping();
-        addMsg('bot', msg.content);
-        history.push({ role: 'assistant', content: msg.content, ts: new Date().toISOString() });
+        addMsg('bot', msg.content, { fromAdmin: true });
+        // fromAdmin/time 메타 보존 — 다음 syncOnly 라운드트립에서도 어드민 식별성 유지
+        history.push({
+          role: 'assistant',
+          content: msg.content,
+          fromAdmin: true,
+          time: msg.time,
+          ts: msg.time || new Date().toISOString(),
+        });
         // 탭이 백그라운드일 때 브라우저 알림
         if (document.visibilityState !== 'visible' && Notification.permission === 'granted') {
           new Notification('👩‍💼 담당자 메시지', {
@@ -830,8 +837,9 @@ async function startChat() {
           addMsg(m.role === 'assistant' ? 'bot' : 'user', m.content, {
             mid: m.mid,
             replyTo: m.replyTo ?? null,
-            time: m.ts || null,
+            time: m.ts || m.time || null,
             skipQuoteImage: true,
+            fromAdmin: !!m.fromAdmin,
           });
         }
       } catch (e) {
