@@ -84,11 +84,11 @@ app.use(express.json());
 const SLACK_SERVICE = 'lumane-chatbot';
 // AI 제공자 — 모델 교체 시 env 한 줄만 바꾸면 알림 메시지가 자동 반영
 const AI_PROVIDER = process.env.AI_PROVIDER || 'anthropic';
-// 챗봇 사이트 URL — 알림 본문 끝에 링크 한 줄 부착. 미설정 시 링크 생략 (무해 fallback)
-const CHATBOT_URL = process.env.CHATBOT_URL || '';
+// 어드민 페이지 URL — 알림 본문 끝에 링크 한 줄 부착. 미설정 시 링크 생략 (무해 fallback)
+const ADMIN_URL = process.env.ADMIN_URL || '';
 function notifySlack(event, emoji, body) {
   if (!process.env.SLACK_WEBHOOK_URL) return;
-  const link = CHATBOT_URL ? `\n<${CHATBOT_URL}|챗봇 바로가기>` : '';
+  const link = ADMIN_URL ? `\n<${ADMIN_URL}|어드민 바로가기>` : '';
   const text = `${emoji} *${event}* [${SLACK_SERVICE}]\n${body}${link}`;
   fetch(process.env.SLACK_WEBHOOK_URL, {
     method: 'POST',
