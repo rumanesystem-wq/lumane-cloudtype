@@ -452,6 +452,9 @@ html, body {
 .msg-bubbles .bubble.bot:not(:first-child) {
   border-radius: 2px 16px 16px 2px;
 }
+/* 어드민(루마네 담당자) 메시지: AI 응답과 시각 분간 — 따뜻한 베이지 톤 */
+.msg-group.bot.admin .msg-sender { color: #a8883f; }
+.msg-group.bot.admin .bubble.bot { background: #fdf8ec; }
 .bubble.user {
   background: linear-gradient(135deg, #c9a96e, #a8883f);
   color: var(--white);

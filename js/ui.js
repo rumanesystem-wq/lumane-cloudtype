@@ -443,7 +443,7 @@ async function renderQuoteImage(text) {
 /* ================================================================
    메시지 렌더링
 ================================================================ */
-export function addMsg(role, text, { mid = null, replyTo = null, time = null, skipQuoteImage = false } = {}) {
+export function addMsg(role, text, { mid = null, replyTo = null, time = null, skipQuoteImage = false, fromAdmin = false } = {}) {
   const clean = text.replace(/```json[\s\S]*?```/g, '').trim();
   const msgMid = mid ?? allocMid();
 
@@ -453,7 +453,7 @@ export function addMsg(role, text, { mid = null, replyTo = null, time = null, sk
     const parts = clean.split(/\n\n+/).map(p => p.trim()).filter(Boolean);
 
     const group = document.createElement('div');
-    group.className = 'msg-group bot';
+    group.className = fromAdmin ? 'msg-group bot admin' : 'msg-group bot';
     group.dataset.mid = msgMid;
 
     /* 아바타 */
@@ -466,10 +466,10 @@ export function addMsg(role, text, { mid = null, replyTo = null, time = null, sk
     const body = document.createElement('div');
     body.className = 'msg-body';
 
-    /* 발신자 이름 */
+    /* 발신자 이름 — 어드민이면 '루마네 담당자' 로 표기 (AI 와 시각 구분) */
     const sender = document.createElement('div');
     sender.className = 'msg-sender';
-    sender.textContent = '루마네';
+    sender.textContent = fromAdmin ? '루마네 담당자' : '루마네';
     body.appendChild(sender);
 
     /* 말풍선 행 */
