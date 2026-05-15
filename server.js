@@ -982,7 +982,9 @@ async function buildApiMessages(messages) {
 
 // ── 채팅 API ──────────────────────────────────────────────────
 app.post('/api/chat', chatRateLimit, async (req, res) => {
-  const { messages, sessionId, syncOnly, isTest } = req.body;
+  // messages 는 fromAdmin 보존 merge 단계에서 재할당되므로 let
+  let { messages } = req.body;
+  const { sessionId, syncOnly, isTest } = req.body;
 
   if (!messages || !Array.isArray(messages)) {
     return res.status(400).json({ error: 'messages 배열이 필요합니다.' });
