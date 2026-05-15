@@ -482,13 +482,16 @@ setInterval(async () => {
 // 서버 재시작(배포) 시 in-memory sessions Map 휘발 → 어드민 개입 상태 소실.
 // DB conversations.mode = 'admin' + 최근 활동분만 메모리에 다시 로드해서
 // 고객이 다음 메시지 보낼 때 AI 가 끼어들지 않도록.
+// 임시 이름 패턴: customerName 초기값으로 박는 "MM/DD HH:mm" 형식
+const TEMP_NAME_RE = /^\d{2}\/\d{2}\s\d{2}:\d{2}$/;
+
 async function hydrateAdminSessions() {
   try {
     const HYDRATE_WINDOW = 24 * 60 * 60 * 1000; // 24시간 (cleanup 30분 + 충분한 여유)
     const cutoff = new Date(Date.now() - HYDRATE_WINDOW).toISOString();
     const { data, error } = await supabase
       .from('conversations')
-      .select('session_id, mode, messages, started_at, customer_name, src, src2')
+      .select('session_id, mode, messages, started_at, customer_name, phone, is_test, src, src2')
       .eq('mode', 'admin')
       .gte('saved_at', cutoff);
     if (error) throw error;
@@ -497,17 +500,18 @@ async function hydrateAdminSessions() {
     for (const row of data || []) {
       if (!row.session_id || !SESSION_ID_RE.test(row.session_id)) continue;
       if (sessions.has(row.session_id)) continue;
+      const customerName = row.customer_name || null;
       sessions.set(row.session_id, {
         id: row.session_id,
         mode: 'admin',
         messages: Array.isArray(row.messages) ? row.messages : [],
         pendingAdminMsgs: [],
-        customerName: row.customer_name || null,
-        customerNameIsTemp: false,
-        customerPhone: null,
+        customerName,
+        customerNameIsTemp: !customerName || TEMP_NAME_RE.test(customerName),
+        customerPhone: row.phone || null,
         lastQuoteReply: null,
         customerInstallSaved: false,
-        isTest: false,
+        isTest: row.is_test === true,
         startedAt: row.started_at ? new Date(row.started_at) : new Date(),
         lastActivity: new Date(),
         lastMessageAt: new Date(),
