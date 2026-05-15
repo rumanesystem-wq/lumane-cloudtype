@@ -481,6 +481,7 @@ async function send(prefilledText) {
 
       /* ── admin이 난입 중이면 AI 응답 없음 ── */
       if (data.adminMode) {
+        saveHistory();  // #22: user 메시지 localStorage 보존 (새로고침 시 소실 방지)
         setLoading(false);
         return;
       }
