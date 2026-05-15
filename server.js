@@ -465,6 +465,11 @@ setInterval(async () => {
   for (const [id, sess] of sessions) {
     if (now - sess.lastActivity > THRESHOLD) {
       const snapshotActivity = sess.lastActivity;
+      // #27: admin 모드 세션은 cleanup 시 ai 로 자동 강등 후 정리
+      //   - 어드민이 자리 비운 사이 고객이 다시 오면 AI 가 정상 응답
+      //   - DB 에는 mode='ai' 로 저장되므로 부팅 hydrate 도 안 잡힘
+      const wasAdmin = sess.mode === 'admin';
+      if (wasAdmin) sess.mode = 'ai';
       try {
         await saveConversation(sess, 'expired');
       } catch (e) {
@@ -473,6 +478,12 @@ setInterval(async () => {
       // save 도중 새 활동이 있었으면 (lastActivity 갱신됨) 세션 유지
       if (sess.lastActivity === snapshotActivity) {
         sessions.delete(id);
+        if (wasAdmin) {
+          notifySlack('어드민자동복귀', '⏰', `session=${id.slice(0, 8)} 30분 무활동으로 AI 자동 복귀`);
+        }
+      } else if (wasAdmin) {
+        // 살린 경우엔 admin 모드 원복 (강등 취소)
+        sess.mode = 'admin';
       }
     }
   }
