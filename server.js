@@ -402,6 +402,7 @@ async function upsertConversation(sess) {
       messages:        sess.messages,
       src:             sess.src || null,
       src2:            sess.src2 || null,
+      mode:            sess.mode || 'ai',  // #21: admin 모드 영속화 (마이그레이션 2026-05-15)
     };
 
     await supabase.from(table).upsert(payload, { onConflict: 'session_id' });
@@ -476,6 +477,59 @@ setInterval(async () => {
     }
   }
 }, 5 * 60 * 1000);
+
+// ── #21: 부팅 시 admin 모드 세션 메모리 복원 ─────────────────
+// 서버 재시작(배포) 시 in-memory sessions Map 휘발 → 어드민 개입 상태 소실.
+// DB conversations.mode = 'admin' + 최근 활동분만 메모리에 다시 로드해서
+// 고객이 다음 메시지 보낼 때 AI 가 끼어들지 않도록.
+async function hydrateAdminSessions() {
+  try {
+    const HYDRATE_WINDOW = 24 * 60 * 60 * 1000; // 24시간 (cleanup 30분 + 충분한 여유)
+    const cutoff = new Date(Date.now() - HYDRATE_WINDOW).toISOString();
+    const { data, error } = await supabase
+      .from('conversations')
+      .select('session_id, mode, messages, started_at, customer_name, src, src2')
+      .eq('mode', 'admin')
+      .gte('saved_at', cutoff);
+    if (error) throw error;
+
+    let restored = 0;
+    for (const row of data || []) {
+      if (!row.session_id || !SESSION_ID_RE.test(row.session_id)) continue;
+      if (sessions.has(row.session_id)) continue;
+      sessions.set(row.session_id, {
+        id: row.session_id,
+        mode: 'admin',
+        messages: Array.isArray(row.messages) ? row.messages : [],
+        pendingAdminMsgs: [],
+        customerName: row.customer_name || null,
+        customerNameIsTemp: false,
+        customerPhone: null,
+        lastQuoteReply: null,
+        customerInstallSaved: false,
+        isTest: false,
+        startedAt: row.started_at ? new Date(row.started_at) : new Date(),
+        lastActivity: new Date(),
+        lastMessageAt: new Date(),
+        lastReadAt: null,
+        adminTyping: false,
+        customerTyping: false,
+        fallbackSent: false,
+        tokens: { input: 0, output: 0, cacheWrite: 0, cacheRead: 0, turns: 0 },
+        previousQuoteSummary: null,
+        previousQuoteInjected: false,
+        src: row.src || null,
+        src2: row.src2 || null,
+        slackNotified: true, // 재시작 후 상담시작 알림 중복 발사 방지
+      });
+      restored++;
+    }
+    console.log(`🔄 부팅 복원: 어드민 세션 ${restored}개 (조회 ${data?.length || 0}건)`);
+  } catch (e) {
+    console.error('[HYDRATE_ADMIN_FAIL]', e.message);
+  }
+}
+hydrateAdminSessions();
 
 // ── 보안 헤더 (meta 태그 대신 HTTP 헤더로 설정) ──
 app.use((req, res, next) => {
@@ -1613,6 +1667,10 @@ app.post('/api/admin/takeover', (req, res) => {
   sess.mode = 'admin';
   sess.lastActivity = new Date();
   console.log(`🎯 Admin 난입: 세션 ${sessionId}`);
+  // #21: 서버 재시작 대비 DB 영속화 (fire-and-forget)
+  upsertConversation(sess).catch(e => {
+    console.error(`[FAIL_TAKEOVER_PERSIST] session=${sess.id} err=${e.message}`);
+  });
   res.json({ ok: true });
 });
 
@@ -1625,6 +1683,10 @@ app.post('/api/admin/release', (req, res) => {
   sess.mode = 'ai';
   sess.lastActivity = new Date();
   console.log(`🤖 AI 복귀: 세션 ${sessionId}`);
+  // #21: 서버 재시작 대비 DB 영속화 (fire-and-forget)
+  upsertConversation(sess).catch(e => {
+    console.error(`[FAIL_RELEASE_PERSIST] session=${sess.id} err=${e.message}`);
+  });
   res.json({ ok: true });
 });
 
