@@ -70,6 +70,45 @@ function clearUnreadFilter() {
 }
 window.clearUnreadFilter = clearUnreadFilter;
 
+/* ── 유입 소스 통계 — 클라이언트 캐시(C) + 프리워밍(A') ──
+   period → { data, expiresAt }. TTL 60초 (서버 5분 캐시와 함께 빠른 첫 클릭/재진입 보장) */
+const _srcStatsCache = new Map();
+const _SRC_STATS_CLIENT_TTL = 60 * 1000;
+const _SRC_PERIODS = ['today', 'week', 'month', 'all'];
+
+async function _fetchSrcStats(period) {
+  const cached = _srcStatsCache.get(period);
+  if (cached && cached.expiresAt > Date.now()) return cached.data;
+  const res = await fetch(`${SERVER}/api/admin/source-stats?period=${encodeURIComponent(period)}`, { headers: adminHeaders() });
+  if (!res.ok) throw new Error(res.status);
+  const data = await res.json();
+  _srcStatsCache.set(period, { data, expiresAt: Date.now() + _SRC_STATS_CLIENT_TTL });
+  return data;
+}
+
+function _renderSrcStats(listEl, data) {
+  if (!data.counts || data.counts.length === 0) {
+    listEl.innerHTML = '<div style="color:#9ca3af;font-size:13px;">데이터 없음</div>';
+    return;
+  }
+  const total = data.total || 0;
+  listEl.innerHTML = `
+    <div style="font-size:12px;color:#9ca3af;margin-bottom:8px;">총 방문 ${total}건</div>
+    <div style="display:flex;flex-direction:column;gap:6px;">
+      ${data.counts.map(({ src, count }) => {
+        const pct = total > 0 ? Math.round((count / total) * 100) : 0;
+        return `
+          <div style="display:flex;align-items:center;gap:8px;">
+            <div style="min-width:80px;font-size:13px;font-weight:600;color:#111827;">${escAdmin(src)}</div>
+            <div style="flex:1;height:8px;background:#f3f4f6;border-radius:4px;overflow:hidden;">
+              <div style="height:100%;background:#7c3aed;width:${pct}%;"></div>
+            </div>
+            <div style="min-width:60px;text-align:right;font-size:12px;color:#374151;">${count}명 (${pct}%)</div>
+          </div>`;
+      }).join('')}
+    </div>`;
+}
+
 /* ── 유입 소스 통계 로드/렌더링 ── */
 async function loadSourceStats(period = 'today') {
   // 기간 버튼 활성화 토글
@@ -81,36 +120,34 @@ async function loadSourceStats(period = 'today') {
   });
   const listEl = document.getElementById('sourceStatsList');
   if (!listEl) return;
+  /* 캐시 히트 시 '로딩 중…' 깜빡임 없이 즉시 렌더 */
+  const cached = _srcStatsCache.get(period);
+  if (cached && cached.expiresAt > Date.now()) {
+    _renderSrcStats(listEl, cached.data);
+    return;
+  }
   listEl.textContent = '로딩 중…';
   try {
-    const res = await fetch(`${SERVER}/api/admin/source-stats?period=${encodeURIComponent(period)}`, { headers: adminHeaders() });
-    if (!res.ok) throw new Error(res.status);
-    const data = await res.json();
-    if (!data.counts || data.counts.length === 0) {
-      listEl.innerHTML = '<div style="color:#9ca3af;font-size:13px;">데이터 없음</div>';
-      return;
-    }
-    const total = data.total || 0;
-    listEl.innerHTML = `
-      <div style="font-size:12px;color:#9ca3af;margin-bottom:8px;">총 방문 ${total}건</div>
-      <div style="display:flex;flex-direction:column;gap:6px;">
-        ${data.counts.map(({ src, count }) => {
-          const pct = total > 0 ? Math.round((count / total) * 100) : 0;
-          return `
-            <div style="display:flex;align-items:center;gap:8px;">
-              <div style="min-width:80px;font-size:13px;font-weight:600;color:#111827;">${escAdmin(src)}</div>
-              <div style="flex:1;height:8px;background:#f3f4f6;border-radius:4px;overflow:hidden;">
-                <div style="height:100%;background:#7c3aed;width:${pct}%;"></div>
-              </div>
-              <div style="min-width:60px;text-align:right;font-size:12px;color:#374151;">${count}명 (${pct}%)</div>
-            </div>`;
-        }).join('')}
-      </div>`;
+    const data = await _fetchSrcStats(period);
+    _renderSrcStats(listEl, data);
   } catch (err) {
     listEl.innerHTML = `<div style="color:#dc2626;font-size:12px;">로드 실패: ${escAdmin(err.message)}</div>`;
   }
 }
 window.loadSourceStats = loadSourceStats;
+
+/* A' — 어드민 첫 로드 시 4개 기간 병렬 프리워밍 + 'today' 즉시 렌더
+   (프리워밍만 하면 첫 화면이 빈 상태로 남고, 다른 버튼 누르고 돌아와야 보이는 회귀 발생) */
+function prewarmSourceStats() {
+  _SRC_PERIODS.forEach(p => { _fetchSrcStats(p).catch(() => {}); });
+  loadSourceStats('today');
+}
+window.prewarmSourceStats = prewarmSourceStats;
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', prewarmSourceStats);
+} else {
+  prewarmSourceStats();
+}
 
 /* ── 대시보드에서 저장 상담 삭제 ── */
 async function deleteSavedConvFromDash(id, ev) {
@@ -365,6 +402,8 @@ function renderDashboardSessions(sessions) {
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:3px;">
               <div style="display:flex;align-items:center;gap:5px;">
                 <span style="font-size:15px;font-weight:${unread?'700':'600'};color:#111827;">${escAdmin(s.customerName)}</span>
+                <button type="button" title="이름 수정" class="js-rename-btn" data-kind="session" data-id="${escAttr(s.id)}" data-name="${escAttr(s.customerName||'')}" style="background:transparent;border:none;color:#9ca3af;font-size:11px;cursor:pointer;padding:0 2px;line-height:1;">✏️</button>
+                ${s.unreadAdminCount > 0 ? `<span title="고객이 안 읽은 내 답장 ${s.unreadAdminCount}개" style="font-size:11px;padding:1px 6px;border-radius:8px;background:#fbbf24;color:#78350f;font-weight:700;">📬 ${s.unreadAdminCount}</span>` : ''}
                 ${s.startedAt ? `<span style="font-size:11px;color:#9ca3af;font-weight:500;" title="첫 상담 시각">${new Date(s.startedAt).toLocaleTimeString('ko-KR', { hour12:false, hour:'2-digit', minute:'2-digit', second:'2-digit' })}</span>` : ''}
                 <span style="font-size:11px;padding:1px 6px;border-radius:6px;background:#f3f4f6;color:#4b5563;font-weight:600;">${escAdmin(s.src || '직접방문')}</span>
                 ${s.isTest ? '<span style="font-size:10px;padding:1px 5px;border-radius:6px;background:#fef3c7;color:#92400e;font-weight:700;">테스트</span>' : ''}
@@ -421,6 +460,7 @@ function renderDashboardSessions(sessions) {
             <div style="flex:1;min-width:0;">
               <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap;">
                 <span style="font-size:15px;font-weight:${isNew?'700':'600'};color:#111827;">${escAdmin(getConvLabel(c))}</span>
+                <button type="button" title="이름 수정" class="js-rename-btn" data-kind="conversation" data-id="${escAttr(c.id)}" data-name="${escAttr(getConvLabel(c))}" style="background:transparent;border:none;color:#9ca3af;font-size:11px;cursor:pointer;padding:0 2px;line-height:1;">✏️</button>
                 <span style="font-size:11px;padding:1px 6px;border-radius:6px;background:#f3f4f6;color:#4b5563;font-weight:600;">${escAdmin(c.src || '직접방문')}</span>
                 ${c.layout ? `<span style="font-size:11px;padding:1px 6px;border-radius:6px;background:#ede9fe;color:#7c3aed;font-weight:600;">${escAdmin(c.layout)}</span>` : ''}
                 ${c.is_test ? '<span style="font-size:10px;padding:1px 5px;border-radius:6px;background:#fef3c7;color:#92400e;font-weight:700;">테스트</span>' : ''}
