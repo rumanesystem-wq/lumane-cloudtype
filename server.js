@@ -1341,7 +1341,7 @@ async function detectReturningCustomer(sess) {
 
 // ── 어드민: 유입 소스 통계 ────────────────────────────────
 const _sourceStatsCache = new Map(); // period -> { payload, expiresAt }
-const SOURCE_STATS_TTL = 60 * 1000;  // 60초
+const SOURCE_STATS_TTL = 5 * 60 * 1000;  // 5분 (어드민 통계는 실시간성보다 응답속도 우선)
 
 app.get('/api/admin/source-stats', async (req, res) => {
   const VALID_PERIODS = ['today', 'week', 'month', 'all'];
@@ -1403,7 +1403,19 @@ app.get('/api/session/status', (req, res) => {
   const pending = [...sess.pendingAdminMsgs];
   sess.pendingAdminMsgs = [];
 
-  res.json({ mode: sess.mode, pendingMsgs: pending, adminLastRead: sess.lastReadAt || null, adminTyping: sess.adminTyping || false });
+  /* drain 유실 / 페이지 재접속 대비 — 안읽음 admin mid 항상 동봉.
+     클라이언트가 이걸로 _pendingReadMids 동기화 → 어떤 상황이든 mark-read 가능 */
+  const unreadAdminMids = sess.messages
+    .filter(m => m.fromAdmin && m.mid && !m.read)
+    .map(m => m.mid);
+
+  res.json({
+    mode: sess.mode,
+    pendingMsgs: pending,
+    unreadAdminMids,
+    adminLastRead: sess.lastReadAt || null,
+    adminTyping: sess.adminTyping || false,
+  });
 });
 
 // ── 어드민: 활성 세션 목록 ────────────────────────────────────
@@ -1419,6 +1431,8 @@ app.get('/api/admin/sessions', async (_req, res) => {
       mode: sess.mode,
       customerName: sess.customerName || '(이름 미수집)',
       messageCount: sess.messages.filter(m => m.role === 'user').length,
+      /* 어드민 → 고객 안읽음 카운트 (카카오톡 '1' 표시용) */
+      unreadAdminCount: sess.messages.filter(m => m.fromAdmin && !m.read).length,
       startedAt: sess.startedAt,
       lastActivity: sess.lastActivity,
       lastMessageAt: sess.lastMessageAt || sess.startedAt,
@@ -1720,7 +1734,9 @@ app.post('/api/admin/message', (req, res) => {
   const sess = sessions.get(sessionId);
   if (!sess) return res.status(404).json({ error: '세션 없음' });
 
-  const msg = { role: 'assistant', content: trimmed, fromAdmin: true, time: new Date().toISOString() };
+  /* 읽음 추적용 mid + read 플래그. mid는 client mark-read 때 키로 사용 */
+  const mid = `adm-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const msg = { role: 'assistant', content: trimmed, fromAdmin: true, time: new Date().toISOString(), mid, read: false };
   sess.pendingAdminMsgs.push(msg);
   sess.messages.push(msg);
   sess.lastActivity = new Date();
@@ -1736,7 +1752,34 @@ app.post('/api/admin/message', (req, res) => {
     }), 2000);
   });
 
-  res.json({ ok: true });
+  res.json({ ok: true, mid });
+});
+
+// ── 고객: 어드민 메시지 읽음 처리 (mark-read) ─────────────────
+// 고객 채팅 탭이 포커스됐을 때 호출 → 어드민 카드의 "안읽음 N" 뱃지 감소
+app.post('/api/session/mark-read', (req, res) => {
+  const { sessionId, mids } = req.body || {};
+  if (!sessionId || !SESSION_ID_RE.test(sessionId) || !sessions.has(sessionId)) {
+    return res.status(404).json({ error: 'no session' });
+  }
+  if (!Array.isArray(mids) || mids.length === 0) {
+    return res.status(400).json({ error: 'mids array required' });
+  }
+  const sess = sessions.get(sessionId);
+  /* mid 형식 화이트리스트 (server.js에서 발급한 형태만) — 잘못된 입력 차단 */
+  const MID_RE = /^adm-\d+-[a-z0-9]{6}$/;
+  const midSet = new Set(
+    mids.filter(id => typeof id === 'string' && MID_RE.test(id)).slice(0, 100)
+  );
+  let updated = 0;
+  for (const m of sess.messages) {
+    if (m.fromAdmin && m.mid && midSet.has(m.mid) && !m.read) {
+      m.read = true;
+      m.readAt = new Date().toISOString();
+      updated++;
+    }
+  }
+  res.json({ ok: true, updated });
 });
 
 // ── 어드민: 저장된 상담 목록 조회 ────────────────────────────
@@ -1794,6 +1837,43 @@ app.patch('/api/admin/conversations/:id/restore', requireAdmin, async (req, res)
     console.error(`[FAIL_RESTORE_CONV] id=${req.params.id} err=${err.message}`);
     res.status(500).json({ error: err.message });
   }
+});
+
+/* 이름 입력 정규화 — 제어문자 제거 + trim + 40자 제한 */
+function _sanitizeName(raw) {
+  return (typeof raw === 'string' ? raw : '').replace(/[\x00-\x1f\x7f]/g, '').trim().slice(0, 40);
+}
+
+// ── 어드민: 저장된 상담 이름 수정 (라벨 변경, 고객 영향 0) ─────────
+app.patch('/api/admin/conversations/:id/name', requireAdmin, async (req, res) => {
+  const name = _sanitizeName(req.body && req.body.name);
+  if (!name) return res.status(400).json({ error: '이름이 비어있습니다.' });
+  try {
+    const { data, error } = await supabase
+      .from('conversations')
+      .update({ customer_name: name })
+      .eq('id', req.params.id)
+      .select('id, customer_name')
+      .maybeSingle();
+    if (error) throw error;
+    if (!data) return res.status(404).json({ error: '대상 상담이 없습니다.' });
+    res.json({ ok: true, customer_name: data.customer_name });
+  } catch (err) {
+    console.error(`[FAIL_RENAME_CONV] id=${req.params.id} err=${err.message}`);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── 어드민: 라이브 세션 이름 수정 (in-memory, sess.customerName) ────
+app.patch('/api/admin/sessions/:sessionId/name', requireAdmin, (req, res) => {
+  const name = _sanitizeName(req.body && req.body.name);
+  if (!name) return res.status(400).json({ error: '이름이 비어있습니다.' });
+  const sess = sessions.get(req.params.sessionId);
+  if (!sess) return res.status(404).json({ error: '활성 세션이 없습니다.' });
+  sess.customerName = name;
+  /* AI가 다음 응답에서 'OO 고객님' 패턴으로 customerName을 다시 덮어쓰지 못하게 잠금 */
+  sess.customerNameIsTemp = false;
+  res.json({ ok: true, customer_name: name });
 });
 
 // ── 어드민: 휴지통 — 영구 삭제 (hard-delete, 안전장치 포함) ───

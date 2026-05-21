@@ -272,9 +272,43 @@ function startPolling() {
           });
         }
       }
+      /* 서버가 매번 동봉하는 안읽음 mid 목록으로 _pendingReadMids 동기화.
+         drain 유실 / 페이지 재접속 / 새로고침 어떤 상황이든 mark-read 가능 */
+      if (Array.isArray(data.unreadAdminMids)) {
+        _pendingReadMids.clear();
+        data.unreadAdminMids.forEach(id => _pendingReadMids.add(id));
+      }
+      /* 받자마자 시도 — 탭이 포커스 상태면 즉시 read 처리, 아니면 다음 visible 이벤트 때 처리 */
+      _markReadIfFocused();
     } catch { /* 네트워크 오류 무시 */ }
   }, 2000);
 }
+
+/* ── 어드민 메시지 읽음 처리 (카카오톡 '1' 사라짐 효과) ──
+   read 정의: 채팅 탭이 활성 + 포커스됐을 때. 둘 다 만족할 때만 read 처리 */
+const _pendingReadMids = new Set();
+
+function _markReadIfFocused() {
+  if (_pendingReadMids.size === 0) return;
+  if (document.visibilityState !== 'visible') return;  /* 다른 탭 보고 있으면 미루기 */
+  const mids = [..._pendingReadMids];
+  fetch(`${SERVER}/api/session/mark-read`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sessionId: SESSION_ID, mids }),
+  }).then(r => {
+    if (r.ok) {
+      mids.forEach(m => _pendingReadMids.delete(m));
+    } else if (r.status >= 400 && r.status < 500) {
+      /* 서버가 명시적으로 거부 — 재시도 무의미. Set 비워서 무한 반복 차단 */
+      _pendingReadMids.clear();
+    }
+  }).catch(() => { /* 네트워크 오류 무시 — 다음 visibilitychange 때 재시도 */ });
+}
+
+/* 탭 다시 활성화될 때 누적된 mid 일괄 mark-read */
+document.addEventListener('visibilitychange', _markReadIfFocused);
+window.addEventListener('focus', _markReadIfFocused);
 
 function showAdminBanner(isAdmin) {
   setBanner(
