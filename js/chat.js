@@ -578,9 +578,9 @@ async function send(prefilledText) {
     if (!/케이트블랑.*견적서/.test(reply)) updateQuickFromText(reply);
     saveHistory();
 
-    if (completedQuote) {
-      setTimeout(() => showConfirm(completedQuote), 1200);
-    }
+    // (자동 화면 전환 제거 — 견적서가 채팅창에서 혼자 사라지는 버그 수정)
+    // 견적서 PNG 출력 후 1.2초 뒤 confirmView로 자동 전환되던 코드 제거.
+    // 두 가지 버그 동시 해결: ① 견적서가 혼자 사라짐 ② 그 1.2초 사이 상담사가 적어준 견적도 같이 사라짐.
 
     // 부모 페이지(2패널 레이아웃)에 수집된 고객 정보 전달
     postFieldsToParent();
