@@ -578,8 +578,15 @@ async function send(prefilledText) {
     if (!/케이트블랑.*견적서/.test(reply)) updateQuickFromText(reply);
     saveHistory();
 
+    // (자동 화면 전환 제거 — 견적서가 채팅창에서 혼자 사라지는 버그 수정)
+    // 1.2초 후 confirmView로 자동 전환되던 코드 제거. 두 가지 버그 동시 해결:
+    // ① 견적서가 혼자 사라짐 ② 그 1.2초 사이 상담사가 적어준 견적도 같이 사라짐.
+
+    // 견적서 출력 시 자동으로 어드민 DB에 저장 (접수 자동 처리)
+    // — 손님이 직접 [접수하기] 안 눌러도 견적서 떴으면 어드민 대시보드에 카드로 자동 등록.
+    // — 어드민이 카드 보고 직접 연락 / 카톡 채널로 안내 가능.
     if (completedQuote) {
-      setTimeout(() => showConfirm(completedQuote), 1200);
+      autoSaveConversation(history).catch(e => console.warn('견적 자동 저장 실패:', e.message));
     }
 
     // 부모 페이지(2패널 레이아웃)에 수집된 고객 정보 전달
