@@ -563,7 +563,7 @@ body > main, .site-main { padding-top: var(--header-h); }
 }
 .floating-btn:hover { background: var(--gold-dark); transform: translateY(-3px) scale(1.04); box-shadow: 0 6px 26px rgba(169,136,63,.5); animation: none; }
 @keyframes floatAnim { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
-.floating-insta { background: linear-gradient(45deg,#f09433,#dc2743,#bc1888); padding: 11px 12px; border-radius: 50%; }
+.floating-insta { background: linear-gradient(45deg,#f09433,#dc2743,#bc1888); }
 .floating-quote span { display: inline; }
 
 
@@ -625,8 +625,7 @@ body > main, .site-main { padding-top: var(--header-h); }
 
   .floating-group { gap: 8px; }
   .floating-btn span { display: none; }
-  .floating-quote { padding: 13px 15px; border-radius: 50%; }
-  .floating-insta { padding: 11px 12px; }
+  .floating-btn { padding: 13px 15px; border-radius: 50%; }
 
   .hero-section { min-height: 85vh; }
   .hero-content { padding: 60px 24px; }
