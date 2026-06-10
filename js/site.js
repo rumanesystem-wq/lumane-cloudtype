@@ -129,6 +129,42 @@ document.addEventListener('DOMContentLoaded', () => {
   } else {
     attachSrcToChatLinks();
   }
+
+  // 5. 페이지 방문 비콘 — 랜딩 도착 카운트 (광고 클릭 → 채팅 진입 사이 추적용)
+  //    같은 브라우저 24시간 쿨다운 (재방문 폭증 방지)
+  //    src가 'internal' 이면 보내지 않음 (내부 이동 노이즈)
+  //    /chat 페이지는 보내지 않음 (채팅 진입은 visitor_logs로 별도 기록)
+  try {
+    if (!src || src === 'internal') return;
+    if (/(^|\/)chat(\.html)?($|\?|#)/.test(location.pathname + location.search)) return;
+
+    const VISIT_BEACON_KEY = '루마네_방문비콘쿨다운';
+    const VISITOR_KEY_KEY  = '루마네_방문자키';
+    const NOW = Date.now();
+    let lastTs = 0;
+    try { lastTs = parseInt(localStorage.getItem(VISIT_BEACON_KEY)) || 0; } catch {}
+    if (NOW - lastTs < 24 * 60 * 60 * 1000) return;
+
+    let visitorKey = '';
+    try { visitorKey = localStorage.getItem(VISITOR_KEY_KEY) || ''; } catch {}
+    if (!visitorKey) {
+      visitorKey = 'v_' + Math.random().toString(36).slice(2, 12) + NOW.toString(36);
+      try { localStorage.setItem(VISITOR_KEY_KEY, visitorKey); } catch {}
+    }
+
+    fetch('/api/track-visit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        src, src2,
+        page: location.pathname,
+        visitor_key: visitorKey,
+      }),
+      keepalive: true,
+    }).then(() => {
+      try { localStorage.setItem(VISIT_BEACON_KEY, String(NOW)); } catch {}
+    }).catch(() => {});
+  } catch {}
 })();
 
 // ── 채팅 임베드 → 견적 폼 자동 채우기 ──────────
