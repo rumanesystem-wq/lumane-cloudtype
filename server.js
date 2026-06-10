@@ -1420,6 +1420,175 @@ app.get('/api/admin/source-stats', async (req, res) => {
   }
 });
 
+// ── 어드민: 방문자 통계 (5단계 깔때기) ────────────────────────
+// dev (lumane-server) 동기화. 랜딩(page_visits) → 채팅(visitor_logs) →
+// 대화(conversations) → 견적(quotes) → 접수(quotes.status≠'접수') 5단계.
+app.get('/api/admin/stats/visitors', async (req, res) => {
+  try {
+    const range = Math.min(Math.max(parseInt(req.query.range) || 7, 1), 90);
+    const KST_OFFSET = 9 * 60 * 60 * 1000;
+    const kstNow = new Date(Date.now() + KST_OFFSET);
+    const todayKstStr = kstNow.toISOString().slice(0, 10);
+    const todayStart = new Date(Date.UTC(kstNow.getUTCFullYear(), kstNow.getUTCMonth(), kstNow.getUTCDate()));
+
+    const rangeStartDate = new Date(todayStart);
+    rangeStartDate.setUTCDate(todayStart.getUTCDate() - (range - 1));
+    const rangeStartStr = rangeStartDate.toISOString().slice(0, 10);
+
+    const [pvRes, vlRes, cvRes, qtRes] = await Promise.all([
+      supabase.from('page_visits')
+        .select('src, visitor_key, created_at')
+        .gte('created_at', rangeStartDate.toISOString())
+        .limit(50000),
+      supabase.from('visitor_logs')
+        .select('session_id, src, visited_date')
+        .gte('visited_date', rangeStartStr)
+        .limit(50000),
+      supabase.from('conversations')
+        .select('session_id, started_at, src')
+        .is('deleted_at', null)
+        .gte('started_at', rangeStartDate.toISOString())
+        .limit(50000),
+      supabase.from('quotes')
+        .select('quote_number, created_at, source, status')
+        .gte('created_at', rangeStartDate.toISOString())
+        .limit(50000),
+    ]);
+
+    const pageVisitRows = pvRes.data || [];
+    const visitorRows   = vlRes.data || [];
+    const convRows      = cvRes.data || [];
+    const quoteRows     = qtRes.data || [];
+
+    const visitorsTodaySet = new Set(
+      visitorRows.filter(v => v.visited_date === todayKstStr).map(v => v.session_id).filter(Boolean)
+    );
+    const engagedTodaySet = new Set(
+      convRows.filter(c => new Date(c.started_at) >= todayStart && c.session_id).map(c => c.session_id)
+    );
+    const engagedTodayInVisited = [...engagedTodaySet].filter(id => visitorsTodaySet.has(id));
+
+    const quotedToday = quoteRows.filter(q => new Date(q.created_at) >= todayStart).length;
+    const submittedToday = quoteRows.filter(q =>
+      new Date(q.created_at) >= todayStart && q.status && q.status !== '접수'
+    ).length;
+
+    const daily = [];
+    for (let i = range - 1; i >= 0; i--) {
+      const d = new Date(todayStart);
+      d.setUTCDate(todayStart.getUTCDate() - i);
+      const dStr = d.toISOString().slice(0, 10);
+      const dNext = new Date(d); dNext.setUTCDate(d.getUTCDate() + 1);
+
+      const visitorsOnDay = new Set(
+        visitorRows.filter(v => v.visited_date === dStr).map(v => v.session_id).filter(Boolean)
+      );
+      const engagedOnDay = new Set(
+        convRows.filter(c => {
+          const t = new Date(c.started_at);
+          return t >= d && t < dNext && c.session_id;
+        }).map(c => c.session_id)
+      );
+      const quotedOnDay = quoteRows.filter(q => {
+        const t = new Date(q.created_at);
+        return t >= d && t < dNext;
+      }).length;
+
+      daily.push({
+        date: dStr,
+        visitors: visitorsOnDay.size,
+        engaged: [...engagedOnDay].filter(id => visitorsOnDay.has(id)).length,
+        quoted: quotedOnDay,
+      });
+    }
+
+    const totalVisitors = new Set(visitorRows.map(v => v.session_id).filter(Boolean)).size;
+    const totalEngaged = new Set(
+      convRows.filter(c => c.session_id).map(c => c.session_id)
+    ).size;
+    const totalQuoted = quoteRows.length;
+    const totalSubmitted = quoteRows.filter(q => q.status && q.status !== '접수').length;
+
+    const _emptyBucket = () => ({
+      landing: new Set(),
+      visitors: new Set(),
+      engaged: new Set(),
+      quoted: 0,
+      submitted: 0,
+    });
+    const sourceMap = new Map();
+    pageVisitRows.forEach(p => {
+      const key = p.src || '직접';
+      if (!sourceMap.has(key)) sourceMap.set(key, _emptyBucket());
+      if (p.visitor_key) sourceMap.get(key).landing.add(p.visitor_key);
+    });
+    visitorRows.forEach(v => {
+      const key = v.src || '직접';
+      if (!sourceMap.has(key)) sourceMap.set(key, _emptyBucket());
+      if (v.session_id) sourceMap.get(key).visitors.add(v.session_id);
+    });
+    convRows.forEach(c => {
+      const key = c.src || '직접';
+      if (!sourceMap.has(key)) sourceMap.set(key, _emptyBucket());
+      if (c.session_id) sourceMap.get(key).engaged.add(c.session_id);
+    });
+    quoteRows.forEach(q => {
+      const key = q.source || '직접';
+      if (!sourceMap.has(key)) sourceMap.set(key, _emptyBucket());
+      sourceMap.get(key).quoted++;
+      if (q.status && q.status !== '접수') sourceMap.get(key).submitted++;
+    });
+
+    const bySource = [...sourceMap.entries()].map(([src, m]) => {
+      const l = m.landing.size;
+      const v = m.visitors.size;
+      const e = m.engaged.size;
+      return {
+        src,
+        landing:   l,
+        visitors:  v,
+        engaged:   e,
+        quoted:    m.quoted,
+        submitted: m.submitted,
+        engageRate: v > 0 ? Math.round((e / v) * 1000) / 10 : 0,
+        quoteRate:  v > 0 ? Math.round((m.quoted / v) * 1000) / 10 : 0,
+        chatRate:   l > 0 ? Math.round((v / l) * 1000) / 10 : 0,
+      };
+    }).sort((a, b) => (b.landing || b.visitors) - (a.landing || a.visitors));
+
+    const hourly = Array.from({ length: 24 }, (_, h) => ({ hour: h, conversations: 0 }));
+    convRows.forEach(c => {
+      const t = new Date(c.started_at);
+      if (t >= todayStart) {
+        const kstHour = new Date(t.getTime() + KST_OFFSET).getUTCHours();
+        hourly[kstHour].conversations++;
+      }
+    });
+
+    res.json({
+      kpi: {
+        visitorsToday:  visitorsTodaySet.size,
+        engagedToday:   engagedTodayInVisited.length,
+        quotedToday,
+        submittedToday,
+      },
+      daily,
+      funnel: {
+        visited:   totalVisitors,
+        engaged:   totalEngaged,
+        quoted:    totalQuoted,
+        submitted: totalSubmitted,
+      },
+      bySource,
+      hourly,
+      range,
+    });
+  } catch (err) {
+    console.error('방문자 통계 조회 오류:', err.message);
+    res.status(500).json({ error: '방문자 통계를 불러오는 중 오류가 발생했습니다.' });
+  }
+});
+
 // ── 세션 상태 폴링 API (고객 → 서버, 2초마다) ─────────────────
 // 고객이 admin 난입 여부와 pending 메시지를 확인
 app.get('/api/session/status', (req, res) => {
