@@ -693,6 +693,9 @@ function switchTab(tab) {
     navItems[2].classList.add('active');
     document.getElementById('topbarTitle').textContent = '📡 라이브 상담';
     startLivePolling();
+  } else if (tab === 'visitor-stats') {
+    document.getElementById('topbarTitle').textContent = '📈 방문자 통계';
+    if (typeof loadVisitorStats === 'function') loadVisitorStats(window.currentVsRange || 7);
   } else if (tab === 'tokens') {
     document.getElementById('topbarTitle').textContent = '🪙 토큰 사용량';
     loadTokenStats();
