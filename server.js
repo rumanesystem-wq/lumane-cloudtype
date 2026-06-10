@@ -1275,6 +1275,24 @@ app.post('/api/chat', chatRateLimit, async (req, res) => {
 // ── 세션 등록 API ─────────────────────────────────────────────
 app.post('/api/session/register', async (req, res) => {
   const { sessionId, nickname, isTest, src, src2 } = req.body;
+
+  /* [SRC 진단 로그] 새 라벨 출처 추적용 — 임시 진단 코드 (출처 파악 후 제거 예정)
+     라벨이 코드 외 어디서 들어오는지 추적하기 위해
+     referer / userAgent / origin / src를 cloudtype 로그에 남김 */
+  if (src && typeof src === 'string' && src.trim()) {
+    try {
+      console.log('[SRC_RECV]', JSON.stringify({
+        src: src.trim(),
+        src2: typeof src2 === 'string' ? src2.trim() : null,
+        sessionId,
+        userAgent: req.headers['user-agent'],
+        referer: req.headers['referer'] || req.headers['referrer'],
+        origin: req.headers['origin'],
+        ts: new Date().toISOString(),
+      }));
+    } catch {}
+  }
+
   if (!sessionId || !SESSION_ID_RE.test(sessionId)) {
     return res.status(400).json({ error: '유효하지 않은 sessionId' });
   }
