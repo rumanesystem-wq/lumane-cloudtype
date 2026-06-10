@@ -618,6 +618,38 @@ app.get('/api/version', (req, res) => {
   res.json({ v: SERVER_VERSION });
 });
 
+// ── 페이지 방문 비콘 (랜딩 방문 추적, 채팅 진입 전 단계) ─────
+// 광고 클릭 → 랜딩 도착했는지 추적용. 채팅 안 들어가도 카운트.
+// 같은 visitor_key 24h 쿨다운은 클라이언트에서 처리.
+// 어드민 통계는 dev에서 보지만 같은 Supabase 가리키므로 cloudtype 방문도 집계됨.
+app.post('/api/track-visit', chatRateLimit, async (req, res) => {
+  // 비콘은 절대 클라이언트를 블락하지 않음 — 항상 200 즉시 응답
+  res.json({ ok: true });
+  try {
+    const sanitize = (v) => (typeof v === 'string' ? v : '').trim().slice(0, 50)
+      .replace(/[^a-zA-Z0-9_\-]/g, '');
+    const { src, src2, page, visitor_key } = req.body || {};
+    const ua = (req.headers['user-agent'] || '').slice(0, 250);
+    const pageStr = (typeof page === 'string' ? page : '').slice(0, 200);
+    const vkStr = (typeof visitor_key === 'string' ? visitor_key : '')
+      .replace(/[^a-zA-Z0-9_\-]/g, '').slice(0, 100);
+    const srcStr = sanitize(src);
+    const src2Str = sanitize(src2);
+    if (!srcStr && !pageStr) return;
+    supabase.from('page_visits').insert({
+      src:         srcStr || null,
+      src2:        src2Str || null,
+      page:        pageStr || null,
+      ua,
+      visitor_key: vkStr || null,
+    }).then(({ error }) => {
+      if (error) console.warn('[page_visits] 저장 실패:', error.message);
+    });
+  } catch (e) {
+    console.warn('[track-visit] 처리 오류:', e.message);
+  }
+});
+
 // ── 파일 업로드 (Supabase Storage) ───────────────────────────
 const STORAGE_BUCKET = 'lumane-uploads';
 
