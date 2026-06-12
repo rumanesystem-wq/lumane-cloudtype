@@ -74,6 +74,7 @@ import { toggleHistory, showTranscript, continueFromHistory, closeTranscript, se
 import { toggleCollect, updateCollectDrawer, resetCollect } from './collect.js';
 import { showConfirm, confirmBack, confirmSubmit } from './confirm.js';
 import { autoSaveConversation, openQuote, closeQuote, printQuote } from './quote.js';
+import './chat-export.js';
 
 /* ── 대화 상태 ── */
 let history        = [];
