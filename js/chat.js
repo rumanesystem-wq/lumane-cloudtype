@@ -198,6 +198,18 @@ async function checkServerSilent() {
   } catch { /* 무시 */ }
 }
 
+/* visitor_key 가져오기 (재방문 추적용) — site.js와 동일 키 사용. 없으면 새로 생성 */
+function _getVisitorKey() {
+  try {
+    let v = localStorage.getItem('루마네_방문자키') || '';
+    if (!v) {
+      v = 'v_' + Math.random().toString(36).slice(2, 12) + Date.now().toString(36);
+      localStorage.setItem('루마네_방문자키', v);
+    }
+    return v;
+  } catch { return ''; }
+}
+
 /* 세션 등록 + 현재 히스토리 동기화 */
 async function registerSessionWithHistory() {
   try {
@@ -205,7 +217,7 @@ async function registerSessionWithHistory() {
     await fetch(`${SERVER}/api/session/register`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sessionId: SESSION_ID, nickname: userNickname, isTest: IS_TEST, src: SRC, src2: SRC2 }),
+      body: JSON.stringify({ sessionId: SESSION_ID, nickname: userNickname, isTest: IS_TEST, src: SRC, src2: SRC2, visitor_key: _getVisitorKey() }),
     });
     // 히스토리가 있으면 /api/chat으로 동기화 (빈 응답 OK)
     if (history.length > 0) {
@@ -226,7 +238,7 @@ async function registerSession() {
     await fetch(`${SERVER}/api/session/register`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sessionId: SESSION_ID, nickname: userNickname, isTest: IS_TEST, src: SRC, src2: SRC2 }),
+      body: JSON.stringify({ sessionId: SESSION_ID, nickname: userNickname, isTest: IS_TEST, src: SRC, src2: SRC2, visitor_key: _getVisitorKey() }),
     });
   } catch { /* 무시 */ }
 }
