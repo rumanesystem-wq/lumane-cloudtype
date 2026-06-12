@@ -922,6 +922,8 @@ async function openHistoryDetail(id) {
   document.getElementById('hdMsgs').innerHTML = '';
   document.getElementById('hdReplyInput').value = '';
   document.getElementById('hdReplyArea').style.display = 'none';
+  // 어드민 메모 로드 (백그라운드)
+  if (typeof window.hdLoadMemos === 'function') window.hdLoadMemos(id);
   try {
     const res = await fetch(`${SERVER}/api/admin/conversations/${encodeURIComponent(id)}`, { headers: adminHeaders() });
     if (!res.ok) throw new Error();
