@@ -403,6 +403,8 @@ async function upsertConversation(sess) {
       src:             sess.src || null,
       src2:            sess.src2 || null,
       mode:            sess.mode || 'ai',  // #21: admin 모드 영속화 (마이그레이션 2026-05-15)
+      // visitor_key는 값 있을 때만 포함 — NULL 덮어쓰기 방지 (재방문 추적용 영구 ID 보존)
+      ...(sess.visitor_key ? { visitor_key: sess.visitor_key } : {}),
     };
 
     await supabase.from(table).upsert(payload, { onConflict: 'session_id' });
@@ -502,7 +504,7 @@ async function hydrateAdminSessions() {
     const cutoff = new Date(Date.now() - HYDRATE_WINDOW).toISOString();
     const { data, error } = await supabase
       .from('conversations')
-      .select('session_id, mode, messages, started_at, customer_name, phone, is_test, src, src2')
+      .select('session_id, mode, messages, started_at, customer_name, phone, is_test, src, src2, visitor_key')
       .eq('mode', 'admin')
       .gte('saved_at', cutoff);
     if (error) throw error;
@@ -535,6 +537,7 @@ async function hydrateAdminSessions() {
         previousQuoteInjected: false,
         src: row.src || null,
         src2: row.src2 || null,
+        visitor_key: row.visitor_key || null,
         slackNotified: true, // 재시작 후 상담시작 알림 중복 발사 방지
       });
       restored++;
@@ -1274,7 +1277,7 @@ app.post('/api/chat', chatRateLimit, async (req, res) => {
 
 // ── 세션 등록 API ─────────────────────────────────────────────
 app.post('/api/session/register', async (req, res) => {
-  const { sessionId, nickname, isTest, src, src2 } = req.body;
+  const { sessionId, nickname, isTest, src, src2, visitor_key } = req.body;
 
   /* [SRC 진단 로그] 새 라벨 출처 추적용 — 임시 진단 코드 (출처 파악 후 제거 예정)
      라벨이 코드 외 어디서 들어오는지 추적하기 위해
@@ -1311,6 +1314,10 @@ app.post('/api/session/register', async (req, res) => {
   // 유입 소스 저장 (메모리 + DB)
   if (src && typeof src === 'string')   sess.src  = src.trim().slice(0, 50);
   if (src2 && typeof src2 === 'string') sess.src2 = src2.trim().slice(0, 50);
+  // visitor_key 저장 (재방문 추적용 — 브라우저 영구 ID)
+  if (visitor_key && typeof visitor_key === 'string') {
+    sess.visitor_key = visitor_key.trim().replace(/[^a-zA-Z0-9_\-]/g, '').slice(0, 100);
+  }
   if (sess.src || sess.src2) {
     supabase.from('visitor_logs').upsert(
       {
