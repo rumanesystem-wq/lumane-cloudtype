@@ -156,7 +156,8 @@ window.lvLoadMemos = async function(convId) {
     _renderLvMemoList([]);
     return;
   }
-  if (panel) panel.style.display = 'block';
+  // 사이드 패널 (flex column) 노출
+  if (panel) panel.style.display = 'flex';
   try {
     const res = await fetch(`${SERVER}/api/admin/conversations/${encodeURIComponent(convId)}/memos`, {
       headers: adminHeaders(),
