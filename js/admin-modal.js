@@ -3,6 +3,52 @@
 ================================================================ */
 
 /**
+ * 요청사항 메모에서 첨부 사진 URL 추출 후 모달에 미리보기 렌더
+ * server.js가 메모 끝에 `[첨부 사진] <URL>` 형식으로 박아둠
+ */
+function _renderQuotePhoto(memo) {
+  const reqEl = document.getElementById('dRequest');
+  if (!reqEl) return;
+
+  let slot = document.getElementById('dPhotoSlot');
+  if (!slot) {
+    slot = document.createElement('div');
+    slot.id = 'dPhotoSlot';
+    slot.style.marginTop = '8px';
+    reqEl.parentNode.insertBefore(slot, reqEl.nextSibling);
+  }
+
+  slot.replaceChildren();
+  const m = (memo || '').match(/\[첨부 사진\]\s+(https?:\/\/\S+)/);
+  if (!m) return;
+
+  // DOM API로 안전 구성 (innerHTML 금지) + 호스트·스킴 화이트리스트
+  let url;
+  try {
+    const u = new URL(m[1]);
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return;
+    if (!/\.supabase\.co$/i.test(u.hostname)) return; // Supabase Storage 도메인만 허용
+    url = u.href;
+  } catch { return; }
+
+  const a = document.createElement('a');
+  a.href = url;
+  a.target = '_blank';
+  a.rel = 'noopener noreferrer';
+  a.referrerPolicy = 'no-referrer';
+  a.title = '크게 보기';
+
+  const img = document.createElement('img');
+  img.alt = '첨부 사진';
+  img.referrerPolicy = 'no-referrer';
+  img.style.cssText = 'max-width:240px;max-height:240px;border-radius:8px;border:1px solid #e5e7eb;cursor:zoom-in;display:block;';
+  img.src = url;
+
+  a.appendChild(img);
+  slot.appendChild(a);
+}
+
+/**
  * 견적 상세 모달을 엽니다
  */
 function openModal(id) {
@@ -28,6 +74,7 @@ function openModal(id) {
   setValue('dShelfColor', c.선반색상);
   setValue('dPrivacy',    c.개인정보동의);
   setValue('dRequest',    c.요청사항, true);
+  _renderQuotePhoto(c.요청사항);
 
   document.getElementById('editStatus').value    = quote.상태;
   document.getElementById('editManager').value   = quote.담당자 || '';
