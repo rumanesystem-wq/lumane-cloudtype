@@ -23,6 +23,19 @@ function handleShelfColorChange(select) {
 function onFileSelected(input) {
   const file = input.files[0];
   if (!file) return;
+
+  // 사전 검증 — 형식·크기
+  if (!/^image\/(jpeg|png|webp)$/.test(file.type)) {
+    alert('JPG, PNG, WebP 이미지만 첨부할 수 있어요.');
+    input.value = '';
+    return;
+  }
+  if (file.size > 10 * 1024 * 1024) {
+    alert('사진 용량이 너무 커요 (10MB 이하). 더 작은 사진을 골라주세요.');
+    input.value = '';
+    return;
+  }
+
   window._selectedFile = file;
 
   const label   = document.getElementById('file-label');
@@ -152,6 +165,7 @@ async function submitQuote(event) {
       privacy_agreed: true,
       status:         '접수',
       file_name:      fileName || '',
+      file_data:      fileData || '',
       has_photo:      fileName ? '사진있음' : '',
     };
 
@@ -161,7 +175,17 @@ async function submitQuote(event) {
       body: JSON.stringify(textPayload),
     });
     if (!res.ok) throw new Error(`저장 실패: ${res.status}`);
-    await res.json();
+    const result = await res.json();
+
+    // 사진 첨부 시도했는데 서버가 거부한 경우 안내
+    if (fileName && result.photo_skipped) {
+      const msg = {
+        size:   '사진 용량이 너무 커서 첨부되지 않았어요.\n견적은 정상 접수되었으니, 카톡으로 사진 따로 보내주세요.',
+        format: '사진 형식이 올바르지 않아 첨부되지 않았어요.\n견적은 정상 접수되었으니, 카톡으로 사진 따로 보내주세요.',
+        upload: '사진 업로드 중 일시적 오류로 첨부되지 않았어요.\n견적은 정상 접수되었으니, 카톡으로 사진 따로 보내주세요.',
+      }[result.photo_skipped] || '사진 첨부가 누락되었어요. 카톡으로 따로 보내주세요. 견적은 정상 접수되었습니다.';
+      alert(msg);
+    }
 
     document.getElementById('quote-form').style.display = 'none';
     const successEl = document.getElementById('quote-success');
@@ -169,7 +193,8 @@ async function submitQuote(event) {
     successEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
   } catch (err) {
-    alert('제출 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.\n' + err.message);
+    console.error('[QUOTE_SUBMIT_ERR]', err && err.message);
+    alert('제출 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.');
     submitBtn.disabled = false;
     submitBtn.innerHTML = '<i class="fas fa-paper-plane"></i> 견적요청 보내기';
   }
