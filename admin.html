@@ -225,6 +225,10 @@
       <select id="managerFilter" onchange="filterQuotes()">
         <option value="">전체 담당자</option>
       </select>
+      <select id="sortFilter" onchange="setQuoteSort(this.value)" title="정렬 순서">
+        <option value="desc">📅 최신순</option>
+        <option value="asc">📅 오래된순</option>
+      </select>
       <button class="btn btn-success" onclick="exportExcel()">📥 엑셀 내보내기</button>
       <button class="btn btn-outline" onclick="window.print()">🖨 인쇄</button>
     </div>
@@ -957,7 +961,7 @@
 <script src="js/admin-quote.js?v=20260615a"></script>
 <script src="js/admin-stats.js?v=20260615a"></script>
 <script src="js/admin-memos.js?v=20260615a"></script>
-<script src="js/admin.js?v=20260615b"></script>
+<script src="js/admin.js?v=20260615c"></script>
 <script src="js/admin-backup.js?v=20260615a"></script>
 <script src="js/admin-trash.js?v=20260615a"></script>
 
