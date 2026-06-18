@@ -561,8 +561,43 @@ function updateDashboard() {
         </div>`).join('');
 }
 
+/* 정렬 순서 저장 — localStorage (기본: 최신순) */
+let _quoteSortDir = (typeof localStorage !== 'undefined' && localStorage.getItem('admin_quote_sort')) || 'desc';
+
+function _sortQuotes(list) {
+  return [...list].sort((a, b) => {
+    const ta = new Date(a.접수시간 || 0).getTime();
+    const tb = new Date(b.접수시간 || 0).getTime();
+    return _quoteSortDir === 'desc' ? tb - ta : ta - tb;
+  });
+}
+
+function setQuoteSort(dir) {
+  _quoteSortDir = (dir === 'asc') ? 'asc' : 'desc';
+  try { localStorage.setItem('admin_quote_sort', _quoteSortDir); } catch {}
+  // 현재 필터·검색 결과 유지하면서 정렬만 다시 적용
+  if (typeof filterQuotes === 'function') {
+    filterQuotes();
+  } else {
+    updateQuoteList();
+  }
+}
+
+/* 페이지 로드 시 select 값 복원 */
+(function _restoreQuoteSort() {
+  const apply = () => {
+    const el = document.getElementById('sortFilter');
+    if (el) el.value = _quoteSortDir;
+  };
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', apply);
+  } else {
+    apply();
+  }
+})();
+
 function updateQuoteList(quotes) {
-  const list      = quotes || allQuotes;
+  const list      = _sortQuotes(quotes || allQuotes);
   const container = document.getElementById('quoteList');
   document.getElementById('quotesCount').textContent = `총 ${list.length}건`;
 
