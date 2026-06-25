@@ -310,7 +310,6 @@ window.liveGoBack = function() {
 window.selectSavedConvInPanel = function(convId) {
   clearInterval(liveMsgPollTimer);
   liveMsgPollTimer     = null;
-  liveSelectedId       = null;
   setSelectedSavedConvId(convId);
 
   // _saveSeenCount 먼저 호출 — markSessionSeen에서 0 저장 제거 후 호출자 책임
@@ -320,46 +319,50 @@ window.selectSavedConvInPanel = function(convId) {
   _saveSeenCount(String(convId), conv.message_count ?? 0);
   markSessionSeen(convId);
 
+  // 끝난 대화도 난입 가능하도록 liveSelectedId에 session_id 세팅
+  // session_id 없으면 난입 불가 — null로 둠 (takeoverSession이 알아서 처리)
+  liveSelectedId = conv.session_id || null;
+
   const label   = getConvLabel(conv);
   const timeStr = conv.saved_at
     ? new Date(conv.saved_at).toLocaleString('ko-KR', { year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' })
     : '-';
 
-  // 패널 헤더 세팅
-  document.getElementById('livePanelTitle').textContent = `📁 ${label}`;
-  document.getElementById('livePanelMeta').textContent  =
-    `${timeStr} · 메시지 ${conv.message_count || 0}개${conv.region ? ' · ' + conv.region : ''}`;
-  document.getElementById('livePanelActions').innerHTML = `
-    <button onclick="openHistoryDetail('${escAttr(convId)}')"
-      style="padding:5px 12px;background:#f3f4f6;color:#374151;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;cursor:pointer;white-space:nowrap;">
-      📋 상세보기
-    </button>`;
-
   // 어드민 메모 로드 (저장된 대화이므로 conv.id 사용)
   if (typeof window.lvLoadMemos === 'function') window.lvLoadMemos(convId);
 
-  // 라이브 전용 UI 숨기기
-  const replyBar = document.getElementById('adminReplyBar');
-  if (replyBar) replyBar.style.display = 'none';
-  const adminInputArea = document.getElementById('adminInputArea');
-  if (adminInputArea) adminInputArea.style.display = 'none';
-
   // 메시지 렌더링 — renderLiveChatPanel 재사용
+  // mode: 이미 어드민이 난입한 적 있으면 'admin', 없으면 'ai' → 난입하기 버튼 표시
   const messages    = Array.isArray(conv.messages) ? conv.messages : [];
-  const fakeSession = { id: conv.id, customerName: label, messages, mode: 'ai', tokens: null };
+  const fakeSession = {
+    id: conv.session_id || conv.id,
+    customerName: label,
+    messages,
+    mode: conv.taken_over_at ? 'admin' : 'ai',
+    tokens: null,
+  };
   renderLiveChatPanel(fakeSession);
 
-  // renderLiveChatPanel이 덮어쓴 헤더/액션 다시 적용
+  // 헤더만 끝난 대화 형식으로 다시 (📁 prefix 유지)
   document.getElementById('livePanelTitle').textContent = `📁 ${label}`;
   document.getElementById('livePanelMeta').textContent  =
     `${timeStr} · 메시지 ${conv.message_count || 0}개${conv.region ? ' · ' + conv.region : ''}`;
-  document.getElementById('livePanelActions').innerHTML = `
-    <button onclick="openHistoryDetail('${escAttr(convId)}')"
-      style="padding:5px 12px;background:#f3f4f6;color:#374151;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;cursor:pointer;white-space:nowrap;">
-      📋 상세보기
-    </button>`;
-  if (replyBar) replyBar.style.display = 'none';
-  if (adminInputArea) adminInputArea.style.display = 'none';
+
+  // 액션 버튼: renderLiveChatPanel이 그린 난입/AI넘기기 옆에 [상세보기] 추가
+  const actions = document.getElementById('livePanelActions');
+  if (actions && !actions.querySelector('[data-saved-detail]')) {
+    actions.insertAdjacentHTML('beforeend', `
+      <button data-saved-detail onclick="openHistoryDetail('${escAttr(convId)}')"
+        style="padding:5px 12px;background:#f3f4f6;color:#374151;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;cursor:pointer;white-space:nowrap;margin-left:6px;">
+        📋 상세보기
+      </button>`);
+  }
+
+  // session_id 없으면 입력창 비활성화 안내
+  if (!conv.session_id) {
+    const input = document.getElementById('adminInput') || document.getElementById('liveInput');
+    if (input) input.placeholder = '이 대화는 세션 정보가 없어 난입할 수 없습니다 (상세보기만 가능)';
+  }
 
   const msgs = document.getElementById('liveMsgs');
   if (msgs) requestAnimationFrame(() => { msgs.scrollTop = msgs.scrollHeight; });
