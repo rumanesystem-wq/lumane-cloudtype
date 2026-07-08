@@ -76,7 +76,7 @@ app.use(cors({
     'http://127.0.0.1:3001',
   ],
 }));
-app.use(express.json());
+app.use(express.json({ limit: '10mb' })); // 견적 폼 사진(base64) 수용
 
 // ── Slack 알림 헬퍼 (fire-and-forget, 이벤트 라벨링) ──────────
 // 포맷: <이모지> *<이벤트명>* [<서비스>]\n<본문>
