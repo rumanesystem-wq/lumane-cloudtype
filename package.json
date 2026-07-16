@@ -4,7 +4,8 @@
   "description": "케이트블랑 루마네 AI 상담 서버",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node --test"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",

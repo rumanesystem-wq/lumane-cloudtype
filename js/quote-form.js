@@ -119,6 +119,9 @@ function validateQuoteForm() {
   return valid;
 }
 
+let quoteRequestId = null;
+let quoteRequestFingerprint = null;
+
 // ── 폼 제출 ───────────────────────────────────
 async function submitQuote(event) {
   event.preventDefault();
@@ -168,6 +171,12 @@ async function submitQuote(event) {
       file_data:      fileData || '',
       has_photo:      fileName ? '사진있음' : '',
     };
+    const fingerprint = JSON.stringify(textPayload);
+    if (!quoteRequestId || quoteRequestFingerprint !== fingerprint) {
+      quoteRequestId = crypto.randomUUID();
+      quoteRequestFingerprint = fingerprint;
+    }
+    textPayload.request_id = quoteRequestId;
 
     const res = await fetch(apiUrl('api/quote'), {
       method: 'POST',
@@ -191,6 +200,8 @@ async function submitQuote(event) {
     const successEl = document.getElementById('quote-success');
     successEl.classList.add('show');
     successEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    quoteRequestId = null;
+    quoteRequestFingerprint = null;
 
   } catch (err) {
     console.error('[QUOTE_SUBMIT_ERR]', err && err.message);
@@ -202,6 +213,8 @@ async function submitQuote(event) {
 
 // ── 폼 초기화 ─────────────────────────────────
 function resetQuoteForm() {
+  quoteRequestId = null;
+  quoteRequestFingerprint = null;
   const form    = document.getElementById('quote-form');
   const success = document.getElementById('quote-success');
   if (form) {
