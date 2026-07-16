@@ -23,6 +23,7 @@ const {
   normalizeStoredMessages,
 } = require('./lib/conversation-contract');
 const { SessionSerializer } = require('./lib/session-serializer');
+const { insertIdempotentQuote } = require('./lib/quote-storage');
 const AdmZip = require('adm-zip');
 const fs   = require('fs');
 const path = require('path');
@@ -164,14 +165,32 @@ const sessions = new Map();
 const sessionSerializer = new SessionSerializer();
 const sessionHydrations = new Map();
 
-async function serializeSessionRequest(req, res, next) {
-  const sessionId = req.body?.sessionId;
-  if (!sessionId || !SESSION_ID_RE.test(sessionId)) return next();
-  const release = await sessionSerializer.acquire(sessionId);
-  const unlock = () => release();
-  res.once('finish', unlock);
-  res.once('close', unlock);
-  next();
+function withSerializedSession(handler) {
+  return async (req, res, next) => {
+    const sessionId = req.body?.sessionId;
+    if (!sessionId || !SESSION_ID_RE.test(sessionId)) {
+      try {
+        return await handler(req, res, next);
+      } catch (error) {
+        return next(error);
+      }
+    }
+
+    const release = await sessionSerializer.acquire(sessionId);
+    const safetyTimer = setTimeout(() => {
+      console.error(`[SESSION_LOCK_TIMEOUT] session=${sessionId}`);
+      release();
+    }, 5 * 60 * 1000);
+    safetyTimer.unref?.();
+    try {
+      return await handler(req, res, next);
+    } catch (error) {
+      return next(error);
+    } finally {
+      clearTimeout(safetyTimer);
+      release();
+    }
+  };
 }
 
 // 토큰 사용량 → Supabase에 영구 저장
@@ -272,6 +291,7 @@ async function ensureSessionHydrated(sessionId, isTest = false) {
       .from(table)
       .select('session_id, mode, messages, started_at, customer_name, phone, src, src2, visitor_key')
       .eq('session_id', sessionId)
+      .is('deleted_at', null)
       .maybeSingle());
     const sess = getOrCreateSession(sessionId);
     if (row) {
@@ -1115,7 +1135,7 @@ async function buildApiMessages(messages) {
 }
 
 // ── 채팅 API ──────────────────────────────────────────────────
-app.post('/api/chat', chatRateLimit, serializeSessionRequest, async (req, res) => {
+app.post('/api/chat', chatRateLimit, withSerializedSession(async (req, res) => {
   const { sessionId, syncOnly, isTest } = req.body;
   let event = req.body.event;
   let messages = [];
@@ -1396,7 +1416,7 @@ app.post('/api/chat', chatRateLimit, serializeSessionRequest, async (req, res) =
     // 이미 fallback을 보낸 세션: 빈 응답 (클라이언트에서 무시)
     res.json({ message: '' });
   }
-});
+}));
 
 // ── 세션 등록 API ─────────────────────────────────────────────
 app.post('/api/session/register', async (req, res) => {
@@ -2737,20 +2757,31 @@ app.post('/api/quote', chatRateLimit, async (req, res) => {
 
     let data;
     let deduplicated = false;
-    try {
-      data = await executeSupabase('form quote insert', () => supabase
+    if (requestId) {
+      const stored = await insertIdempotentQuote({
+        payload,
+        insert: candidate => executeSupabase('form quote insert', () => supabase
+          .from('quotes')
+          .insert([candidate])
+          .select()
+          .single()),
+        findByRequestId: id => executeSupabase('form quote dedup lookup', () => supabase
+          .from('quotes')
+          .select('*')
+          .eq('request_id', id)
+          .maybeSingle()),
+        regenerateQuoteNumber: () =>
+          'KB-' + new Date().toISOString().slice(0,10).replace(/-/g,'') + '-' + crypto.randomBytes(3).toString('hex').toUpperCase(),
+      });
+      data = stored.data;
+      deduplicated = stored.deduplicated;
+      Object.assign(payload, stored.payload);
+    } else {
+      data = await executeSupabase('legacy form quote insert', () => supabase
         .from('quotes')
         .insert([payload])
         .select()
-        .single(), requestId ? {} : { maxAttempts: 1 });
-    } catch (error) {
-      if (!requestId || error.code !== '23505') throw error;
-      data = await executeSupabase('form quote dedup lookup', () => supabase
-        .from('quotes')
-        .select('*')
-        .eq('request_id', requestId)
-        .single());
-      deduplicated = true;
+        .single(), { maxAttempts: 1 });
     }
     payload.quote_number = data?.quote_number || payload.quote_number;
 

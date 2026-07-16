@@ -83,8 +83,69 @@ let pendingConfirm = false;
 let serverOnline   = null;
 
 /* ── 대화 내용 localStorage 저장/복원 ── */
+function uuidV4() {
+  if (window.crypto?.randomUUID) return window.crypto.randomUUID();
+  const bytes = new Uint8Array(16);
+  if (window.crypto?.getRandomValues) window.crypto.getRandomValues(bytes);
+  else for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
 function createClientEvent(content) {
-  return { id: `msg_${crypto.randomUUID()}`, content };
+  return { id: `msg_${uuidV4()}`, content };
+}
+
+async function persistSyncEvent(event) {
+  const res = await fetch(`${SERVER}/api/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ event, sessionId: SESSION_ID, syncOnly: true }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `서버 오류 (${res.status})`);
+  }
+}
+
+function showFileSyncError(event) {
+  const group = document.createElement('div');
+  group.className = 'msg-group bot';
+  const avatar = document.createElement('div');
+  avatar.className = 'av';
+  avatar.textContent = '👩‍💼';
+  const body = document.createElement('div');
+  body.className = 'msg-body';
+  const sender = document.createElement('div');
+  sender.className = 'msg-sender';
+  sender.textContent = '루마네';
+  const bubble = document.createElement('div');
+  bubble.className = 'bubble bot';
+  const text = document.createElement('span');
+  text.textContent = '⚠️ 첨부 메시지를 서버에 저장하지 못했습니다.';
+  const retry = document.createElement('button');
+  retry.type = 'button';
+  retry.textContent = '다시 전송';
+  retry.style.cssText = 'margin-top:8px;padding:4px 10px;font-size:12px;border:1px solid #e5e7eb;border-radius:6px;background:#fff;cursor:pointer;display:block;';
+  retry.addEventListener('click', async () => {
+    retry.disabled = true;
+    retry.textContent = '전송 중...';
+    try {
+      await persistSyncEvent(event);
+      group.remove();
+    } catch (error) {
+      text.textContent = `⚠️ 저장 실패: ${error.message}`;
+      retry.disabled = false;
+      retry.textContent = '다시 전송';
+    }
+  });
+  bubble.append(text, retry);
+  body.append(sender, bubble);
+  group.append(avatar, body);
+  document.getElementById('msgs').appendChild(group);
+  scrollBottom();
 }
 
 const HISTORY_KEY  = '루마네_히스토리';
@@ -442,14 +503,13 @@ async function send(prefilledText, retryEvent = null) {
       const content = isImage ? `[이미지]\n${fullUrl}` : `[파일: ${name}]\n${fullUrl}`;
       const event = createClientEvent(content);
       history.push({ role: 'user', content, eventId: event.id, mid, ts: new Date().toISOString() });
+      saveHistory();
       if (serverOnline) {
         try {
-          await fetch(`${SERVER}/api/chat`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ event, sessionId: SESSION_ID, syncOnly: true }),
-          });
-        } catch { /* 무시 */ }
+          await persistSyncEvent(event);
+        } catch {
+          showFileSyncError(event);
+        }
       }
     });
   }
