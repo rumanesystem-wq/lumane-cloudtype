@@ -31,8 +31,17 @@ begin
 end
 $migration$;
 
-alter table customer.install
-  add column if not exists source_ref text;
+-- customer.install is an optional integration table and is not present in
+-- every deployment. Apply its idempotency key only where that integration
+-- has been provisioned.
+do $migration$
+begin
+  if to_regclass('customer.install') is null then
+    raise notice 'customer.install was not found; skipping source_ref migration';
+    return;
+  end if;
 
-create unique index if not exists install_source_ref_unique
-  on customer.install (source_ref);
+  execute 'alter table customer.install add column if not exists source_ref text';
+  execute 'create unique index if not exists install_source_ref_unique on customer.install (source_ref)';
+end
+$migration$;

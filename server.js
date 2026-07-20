@@ -312,18 +312,21 @@ async function ensureSessionHydrated(sessionId, isTest = false) {
       );
       if (quoteReply && !isTest) {
         const quoteNumber = 'KB-AI-' + sessionId.slice(-8).toUpperCase();
-        const [quoteRow, installRow] = await Promise.all([
-          executeSupabase('AI quote hydrate', () => supabase
-            .from('quotes')
-            .select('quote_number')
-            .eq('quote_number', quoteNumber)
-            .maybeSingle()),
-          executeSupabase('customer.install hydrate', () => supabaseCustomer
+        const quoteRow = await executeSupabase('AI quote hydrate', () => supabase
+          .from('quotes')
+          .select('quote_number')
+          .eq('quote_number', quoteNumber)
+          .maybeSingle());
+        let installRow = null;
+        try {
+          installRow = await executeSupabase('customer.install hydrate', () => supabaseCustomer
             .from('install')
             .select('source_ref')
             .eq('source_ref', quoteNumber)
-            .maybeSingle()),
-        ]);
+            .maybeSingle());
+        } catch (error) {
+          console.warn('customer.install 복구 조회 건너뜀:', error.message);
+        }
         sess.lastQuoteReply = quoteReply.content;
         sess.quoteNotified = !!quoteRow;
         sess.customerInstallSaved = !!installRow;
