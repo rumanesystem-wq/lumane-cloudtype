@@ -28,3 +28,20 @@ test('different sessions do not block each other', async () => {
   releaseA();
   assert.equal(serializer.tails.size, 0);
 });
+
+test('cleanup waits for an active request and observes its refreshed activity', async () => {
+  const serializer = new SessionSerializer();
+  const session = { lastActivity: 1 };
+  const requestRelease = await serializer.acquire('session-a');
+  let cleanupWouldDelete = null;
+
+  const cleanup = serializer.acquire('session-a').then(release => {
+    cleanupWouldDelete = session.lastActivity === 1;
+    release();
+  });
+
+  session.lastActivity = 2;
+  requestRelease();
+  await cleanup;
+  assert.equal(cleanupWouldDelete, false);
+});

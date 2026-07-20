@@ -23,6 +23,13 @@ const {
   normalizeStoredMessages,
 } = require('./lib/conversation-contract');
 const { SessionSerializer } = require('./lib/session-serializer');
+const {
+  SESSION_IDLE_TTL_MS,
+  SESSION_RECOVERY_TTL_MS,
+  isIdleSession,
+  isRecoverableSession,
+  recoverRuntimeState,
+} = require('./lib/session-recovery');
 const { insertIdempotentQuote } = require('./lib/quote-storage');
 const AdmZip = require('adm-zip');
 const fs   = require('fs');
@@ -161,6 +168,7 @@ app.use('/api/admin', requireAdmin);
 // ── 라이브 세션 관리 (메모리) ─────────────────────────────────
 // 서버 재시작 시 초기화됨. 필요 시 Supabase로 이전 가능.
 const SESSION_ID_RE = /^S-\d{13}-[a-z0-9]{5}$/;
+const TEMP_NAME_RE = /^\d{2}\/\d{2}\s\d{2}:\d{2}$/;
 const sessions = new Map();
 const sessionSerializer = new SessionSerializer();
 const sessionHydrations = new Map();
@@ -260,6 +268,7 @@ function getOrCreateSession(sessionId) {
       customerNameIsTemp: true,
       customerPhone: null,
       lastQuoteReply: null,
+      quoteNotified: false,
       customerInstallSaved: false,
       isTest: false,
       startedAt: new Date(),
@@ -269,6 +278,7 @@ function getOrCreateSession(sessionId) {
       adminTyping: false,     // 상담원이 입력 중 여부
       customerTyping: false,  // 고객이 입력 중 여부
       fallbackSent: false,    // API 오류 fallback 메시지 이미 보냈는지
+      slackNotified: false,
       tokens: { input: 0, output: 0, cacheWrite: 0, cacheRead: 0, turns: 0 },
       // ── 재방문 컨텍스트 (Phase 2) ──
       // isReturning: 직전 conversations에 같은 session_id 행이 있으면 true (probe 후 1회만)
@@ -281,56 +291,100 @@ function getOrCreateSession(sessionId) {
   return sessions.get(sessionId);
 }
 
+async function loadRecoveredTokenRow(sessionId) {
+  try {
+    return await executeSupabase('token_stats hydrate', () => supabase
+      .from('token_stats')
+      .select('input_tokens, output_tokens, cache_write_tokens, cache_read_tokens, turns')
+      .eq('session_id', sessionId)
+      .maybeSingle());
+  } catch (error) {
+    console.warn(`[TOKEN_HYDRATE_SKIP] session=${sessionId} err=${error.message}`);
+    return null;
+  }
+}
+
+function applyRecoveredConversation(sess, row, tokenRow, isTest = false) {
+  const messages = normalizeStoredMessages(row.messages);
+  const runtime = recoverRuntimeState(messages, tokenRow, row.saved_at);
+  const customerName = row.customer_name || null;
+
+  sess.mode = row.mode === 'admin' ? 'admin' : 'ai';
+  sess.messages = messages;
+  sess.pendingAdminMsgs = [];
+  sess.customerName = customerName;
+  sess.customerNameIsTemp = !customerName || TEMP_NAME_RE.test(customerName);
+  sess.customerPhone = row.phone || null;
+  sess.startedAt = row.started_at ? new Date(row.started_at) : new Date();
+  sess.lastActivity = runtime.lastPersistedAt ? new Date(runtime.lastPersistedAt) : new Date();
+  sess.lastMessageAt = runtime.lastMessageAt ? new Date(runtime.lastMessageAt) : sess.startedAt;
+  sess.lastReadAt = runtime.lastReadAt;
+  sess.fallbackSent = runtime.fallbackSent;
+  sess.slackNotified = runtime.slackNotified;
+  sess.tokens = runtime.tokens;
+  sess.src = row.src || null;
+  sess.src2 = row.src2 || null;
+  sess.visitor_key = row.visitor_key || null;
+  sess.isTest = isTest;
+  return sess;
+}
+
+async function reconcileRecoveredQuoteState(sess) {
+  const quoteReply = [...sess.messages].reverse().find(message =>
+    message.role === 'assistant' && message.content &&
+    (message.content.includes('총 합계') || message.content.includes('견적서') || message.content.includes('주문내역'))
+  );
+  if (!quoteReply || sess.isTest) return;
+
+  const quoteNumber = 'KB-AI-' + sess.id.slice(-8).toUpperCase();
+  sess.lastQuoteReply = quoteReply.content;
+  let quoteRow;
+  try {
+    quoteRow = await executeSupabase('AI quote hydrate', () => supabase
+      .from('quotes')
+      .select('quote_number')
+      .eq('quote_number', quoteNumber)
+      .maybeSingle());
+  } catch (error) {
+    // 조회 불능 상태에서는 중복 운영 알림을 막는 쪽으로 보수적으로 복구한다.
+    sess.quoteNotified = true;
+    console.warn(`[QUOTE_RECONCILE_DEFER] session=${sess.id} err=${error.message}`);
+    return;
+  }
+  let installRow = null;
+  try {
+    installRow = await executeSupabase('customer.install hydrate', () => supabaseCustomer
+      .from('install')
+      .select('source_ref')
+      .eq('source_ref', quoteNumber)
+      .maybeSingle());
+  } catch (error) {
+    console.warn('customer.install 복구 조회 건너뜀:', error.message);
+  }
+  sess.quoteNotified = !!quoteRow;
+  sess.customerInstallSaved = !!installRow;
+}
+
 async function ensureSessionHydrated(sessionId, isTest = false) {
   if (sessions.has(sessionId)) return sessions.get(sessionId);
   if (sessionHydrations.has(sessionId)) return sessionHydrations.get(sessionId);
 
   const hydration = (async () => {
     const table = isTest ? 'test_conversations' : 'conversations';
+    const now = Date.now();
+    const cutoff = new Date(now - SESSION_RECOVERY_TTL_MS).toISOString();
     const row = await executeSupabase('conversation hydrate', () => supabase
       .from(table)
-      .select('session_id, mode, messages, started_at, customer_name, phone, src, src2, visitor_key')
+      .select('session_id, mode, messages, started_at, saved_at, customer_name, phone, src, src2, visitor_key')
       .eq('session_id', sessionId)
       .is('deleted_at', null)
+      .gte('saved_at', cutoff)
       .maybeSingle());
     const sess = getOrCreateSession(sessionId);
-    if (row) {
-      sess.mode = row.mode === 'admin' ? 'admin' : 'ai';
-      sess.messages = normalizeStoredMessages(row.messages);
-      sess.customerName = row.customer_name || null;
-      sess.customerNameIsTemp = !row.customer_name || TEMP_NAME_RE.test(row.customer_name);
-      sess.customerPhone = row.phone || null;
-      sess.startedAt = row.started_at ? new Date(row.started_at) : new Date();
-      sess.src = row.src || null;
-      sess.src2 = row.src2 || null;
-      sess.visitor_key = row.visitor_key || null;
-      sess.isTest = isTest;
-      sess.slackNotified = true;
-      const quoteReply = [...sess.messages].reverse().find(message =>
-        message.role === 'assistant' && message.content &&
-        (message.content.includes('총 합계') || message.content.includes('견적서') || message.content.includes('주문내역'))
-      );
-      if (quoteReply && !isTest) {
-        const quoteNumber = 'KB-AI-' + sessionId.slice(-8).toUpperCase();
-        const quoteRow = await executeSupabase('AI quote hydrate', () => supabase
-          .from('quotes')
-          .select('quote_number')
-          .eq('quote_number', quoteNumber)
-          .maybeSingle());
-        let installRow = null;
-        try {
-          installRow = await executeSupabase('customer.install hydrate', () => supabaseCustomer
-            .from('install')
-            .select('source_ref')
-            .eq('source_ref', quoteNumber)
-            .maybeSingle());
-        } catch (error) {
-          console.warn('customer.install 복구 조회 건너뜀:', error.message);
-        }
-        sess.lastQuoteReply = quoteReply.content;
-        sess.quoteNotified = !!quoteRow;
-        sess.customerInstallSaved = !!installRow;
-      }
+    if (row && isRecoverableSession(row, now)) {
+      const tokenRow = await loadRecoveredTokenRow(sessionId);
+      applyRecoveredConversation(sess, row, tokenRow, isTest);
+      await reconcileRecoveredQuoteState(sess);
     }
     return sess;
   })();
@@ -500,6 +554,7 @@ async function upsertConversation(sess) {
     estimated_price: estimatedPrice || null,
     message_count:   sess.messages.length,
     started_at:      sess.startedAt,
+    saved_at:        new Date().toISOString(),
     messages:        sess.messages,
     src:             sess.src || null,
     src2:            sess.src2 || null,
@@ -562,36 +617,46 @@ async function saveConversation(sess, reason) {
   }
 }
 
-// 30분 이상 비활성 세션 정리 (메모리 관리) — 만료 전 대화 자동 저장
-// H3 fix: cleanup 도중 사용자 활동 시 race condition 방지
-//   - cleanup 시작 시 lastActivity 시점 기록
-//   - save 끝난 후 lastActivity 다시 확인 → 그동안 새 활동 있었으면 삭제 스킵 (세션 살림)
+// 30분 이상 비활성 세션 정리 (메모리 관리) — 만료 전 대화 자동 저장.
+// 채팅 요청과 같은 세션 락을 사용해 cleanup/save/delete가 신규 user 이벤트와 겹치지 않게 한다.
+async function cleanupExpiredSession(id) {
+  const release = await sessionSerializer.acquire(id);
+  try {
+    const sess = sessions.get(id);
+    if (!sess || !isIdleSession(sess.lastActivity)) return;
+
+    const snapshotActivity = sess.lastActivity;
+    // #27: admin 모드 세션은 cleanup 시 ai 로 자동 강등 후 정리
+    const wasAdmin = sess.mode === 'admin';
+    if (wasAdmin) sess.mode = 'ai';
+    try {
+      await saveConversation(sess, 'expired');
+    } catch (error) {
+      console.warn('[cleanup save 실패] session=' + id + ' err=' + error.message);
+      if (wasAdmin) sess.mode = 'admin';
+      return;
+    }
+
+    // status polling처럼 락 밖에서 갱신되는 활동도 마지막에 다시 확인한다.
+    if (sessions.get(id) === sess && sess.lastActivity === snapshotActivity) {
+      sessions.delete(id);
+      if (wasAdmin) {
+        notifySlack('어드민자동복귀', '⏰', `session=${id.slice(0, 8)} 30분 무활동으로 AI 자동 복귀`);
+      }
+    } else if (wasAdmin) {
+      sess.mode = 'admin';
+    }
+  } finally {
+    release();
+  }
+}
+
 setInterval(async () => {
-  const THRESHOLD = 30 * 60 * 1000;
-  const now = Date.now();
-  for (const [id, sess] of sessions) {
-    if (now - sess.lastActivity > THRESHOLD) {
-      const snapshotActivity = sess.lastActivity;
-      // #27: admin 모드 세션은 cleanup 시 ai 로 자동 강등 후 정리
-      //   - 어드민이 자리 비운 사이 고객이 다시 오면 AI 가 정상 응답
-      //   - DB 에는 mode='ai' 로 저장되므로 부팅 hydrate 도 안 잡힘
-      const wasAdmin = sess.mode === 'admin';
-      if (wasAdmin) sess.mode = 'ai';
-      try {
-        await saveConversation(sess, 'expired');
-      } catch (e) {
-        console.warn('[cleanup save 실패] session=' + id + ' err=' + e.message);
-      }
-      // save 도중 새 활동이 있었으면 (lastActivity 갱신됨) 세션 유지
-      if (sess.lastActivity === snapshotActivity) {
-        sessions.delete(id);
-        if (wasAdmin) {
-          notifySlack('어드민자동복귀', '⏰', `session=${id.slice(0, 8)} 30분 무활동으로 AI 자동 복귀`);
-        }
-      } else if (wasAdmin) {
-        // 살린 경우엔 admin 모드 원복 (강등 취소)
-        sess.mode = 'admin';
-      }
+  for (const id of [...sessions.keys()]) {
+    try {
+      await cleanupExpiredSession(id);
+    } catch (error) {
+      console.error(`[SESSION_CLEANUP_FAIL] session=${id} err=${error.message}`);
     }
   }
 }, 5 * 60 * 1000);
@@ -600,54 +665,35 @@ setInterval(async () => {
 // 서버 재시작(배포) 시 in-memory sessions Map 휘발 → 어드민 개입 상태 소실.
 // DB conversations.mode = 'admin' + 최근 활동분만 메모리에 다시 로드해서
 // 고객이 다음 메시지 보낼 때 AI 가 끼어들지 않도록.
-// 임시 이름 패턴: customerName 초기값으로 박는 "MM/DD HH:mm" 형식
-const TEMP_NAME_RE = /^\d{2}\/\d{2}\s\d{2}:\d{2}$/;
-
 async function hydrateAdminSessions() {
   try {
-    const HYDRATE_WINDOW = 24 * 60 * 60 * 1000; // 24시간 (cleanup 30분 + 충분한 여유)
-    const cutoff = new Date(Date.now() - HYDRATE_WINDOW).toISOString();
+    const now = Date.now();
+    const cutoff = new Date(now - SESSION_IDLE_TTL_MS).toISOString();
     const { data, error } = await supabase
       .from('conversations')
-      .select('session_id, mode, messages, started_at, customer_name, phone, is_test, src, src2, visitor_key')
+      .select('session_id, mode, messages, started_at, saved_at, customer_name, phone, is_test, src, src2, visitor_key')
       .eq('mode', 'admin')
+      .is('deleted_at', null)
       .gte('saved_at', cutoff);
     if (error) throw error;
 
     let restored = 0;
     for (const row of data || []) {
       if (!row.session_id || !SESSION_ID_RE.test(row.session_id)) continue;
-      if (sessions.has(row.session_id)) continue;
-      const customerName = row.customer_name || null;
-      sessions.set(row.session_id, {
-        id: row.session_id,
-        mode: 'admin',
-        messages: Array.isArray(row.messages) ? row.messages : [],
-        pendingAdminMsgs: [],
-        customerName,
-        customerNameIsTemp: !customerName || TEMP_NAME_RE.test(customerName),
-        customerPhone: row.phone || null,
-        lastQuoteReply: null,
-        customerInstallSaved: false,
-        isTest: row.is_test === true,
-        startedAt: row.started_at ? new Date(row.started_at) : new Date(),
-        lastActivity: new Date(),
-        lastMessageAt: new Date(),
-        lastReadAt: null,
-        adminTyping: false,
-        customerTyping: false,
-        fallbackSent: false,
-        tokens: { input: 0, output: 0, cacheWrite: 0, cacheRead: 0, turns: 0 },
-        previousQuoteSummary: null,
-        previousQuoteInjected: false,
-        src: row.src || null,
-        src2: row.src2 || null,
-        visitor_key: row.visitor_key || null,
-        slackNotified: true, // 재시작 후 상담시작 알림 중복 발사 방지
-      });
-      restored++;
+      const release = await sessionSerializer.acquire(row.session_id);
+      try {
+        if (sessions.has(row.session_id)) continue;
+        if (!isRecoverableSession(row, now, SESSION_IDLE_TTL_MS)) continue;
+        const tokenRow = await loadRecoveredTokenRow(row.session_id);
+        const sess = getOrCreateSession(row.session_id);
+        applyRecoveredConversation(sess, row, tokenRow, row.is_test === true);
+        await reconcileRecoveredQuoteState(sess);
+        restored++;
+      } finally {
+        release();
+      }
     }
-    console.log(`🔄 부팅 복원: 어드민 세션 ${restored}개 (조회 ${data?.length || 0}건)`);
+    console.log(`[SESSION_RECOVERY] admin_restored=${restored} scanned=${data?.length || 0} window_min=${SESSION_IDLE_TTL_MS / 60000}`);
   } catch (e) {
     console.error('[HYDRATE_ADMIN_FAIL]', e.message);
   }
@@ -1404,13 +1450,15 @@ app.post('/api/chat', chatRateLimit, withSerializedSession(async (req, res) => {
         replyTo: clientMessage?.id,
       });
       sess.lastActivity = new Date();
-      sess.fallbackSent = true;
-      // Slack 알림 — 세션당 1회 (sess.fallbackSent 가드와 동일 조건)
-      // err.status (HTTP, 401/429/529 등), err.name (RateLimitError/OverloadedError 등) 정확히 노출
-      notifySlack('LLM호출실패', '🚨', `provider=${AI_PROVIDER} status=${err.status ?? '?'} name=${err.name ?? '?'}\nsession=${sess.id.slice(0, 8)}\nerr=${err.message}`);
       try {
         await upsertConversation(sess);
+        sess.fallbackSent = true;
+        // Slack 알림 — fallback 저장이 확인된 세션당 1회
+        // err.status (HTTP, 401/429/529 등), err.name (RateLimitError/OverloadedError 등) 정확히 노출
+        notifySlack('LLM호출실패', '🚨', `provider=${AI_PROVIDER} status=${err.status ?? '?'} name=${err.name ?? '?'}\nsession=${sess.id.slice(0, 8)}\nerr=${err.message}`);
       } catch (saveError) {
+        sess.messages = sess.messages.filter(message => message.id !== savedFallback.id);
+        sess.fallbackSent = false;
         console.error(`[FAIL_FALLBACK_SAVE] session=${sess.id} err=${saveError.message}`);
         return res.status(503).json({ error: '대화를 저장하지 못했습니다. 잠시 후 다시 시도해주세요.' });
       }
@@ -1422,7 +1470,7 @@ app.post('/api/chat', chatRateLimit, withSerializedSession(async (req, res) => {
 }));
 
 // ── 세션 등록 API ─────────────────────────────────────────────
-app.post('/api/session/register', async (req, res) => {
+app.post('/api/session/register', withSerializedSession(async (req, res) => {
   const { sessionId, nickname, isTest, src, src2, visitor_key } = req.body;
 
   /* [SRC 진단 로그] 새 라벨 출처 추적용 — 임시 진단 코드 (출처 파악 후 제거 예정)
@@ -1456,6 +1504,7 @@ app.post('/api/session/register', async (req, res) => {
     console.error(`[FAIL_REGISTER_HYDRATE] session=${sessionId} err=${error.message}`);
     return res.status(503).json({ error: '대화 상태를 불러오지 못했습니다.' });
   }
+  sess.lastActivity = new Date();
   if (nickname && typeof nickname === 'string') {
     const trimmed = nickname.trim().slice(0, 20);
     sess.nickname = trimmed;
@@ -1495,7 +1544,7 @@ app.post('/api/session/register', async (req, res) => {
     );
   }
   res.json({ ok: true });
-});
+}));
 
 // ── 재방문 감지 + 직전 견적 요약 추출 ─────────────────────────
 // session_id가 localStorage에 영구 저장되는 점을 이용해 동일 브라우저 재방문을 감지.
@@ -1781,8 +1830,11 @@ app.get('/api/session/status', (req, res) => {
   const sess = sessions.get(id);
   sess.lastActivity = new Date();
 
-  // pending 메시지를 한 번에 전달하고 비움
-  const pending = [...sess.pendingAdminMsgs];
+  // 읽음 처리 전까지 매 poll에 동봉한다. 클라이언트는 mid로 중복 제거하므로
+  // 응답 유실·서버 재시작 사이에도 관리자 메시지가 사라지지 않는다.
+  const pending = sess.messages.filter(message =>
+    message.fromAdmin === true && message.read !== true && message.mid
+  );
   sess.pendingAdminMsgs = [];
 
   /* drain 유실 / 페이지 재접속 대비 — 안읽음 admin mid 항상 동봉.
@@ -2072,7 +2124,7 @@ app.post('/api/session/typing', (req, res) => {
 });
 
 // ── 어드민: 난입 (AI → admin 모드 전환) ──────────────────────
-app.post('/api/admin/takeover', async (req, res) => {
+app.post('/api/admin/takeover', withSerializedSession(async (req, res) => {
   const { sessionId } = req.body;
   const sess = sessions.get(sessionId);
   if (!sess) return res.status(404).json({ error: '세션 없음' });
@@ -2088,10 +2140,10 @@ app.post('/api/admin/takeover', async (req, res) => {
     console.error(`[FAIL_TAKEOVER_PERSIST] session=${sess.id} err=${error.message}`);
     res.status(503).json({ error: '상담원 전환 상태를 저장하지 못했습니다.' });
   }
-});
+}));
 
 // ── 어드민: 돌려주기 (admin → AI 모드 복귀) ─────────────────
-app.post('/api/admin/release', async (req, res) => {
+app.post('/api/admin/release', withSerializedSession(async (req, res) => {
   const { sessionId } = req.body;
   const sess = sessions.get(sessionId);
   if (!sess) return res.status(404).json({ error: '세션 없음' });
@@ -2107,10 +2159,10 @@ app.post('/api/admin/release', async (req, res) => {
     console.error(`[FAIL_RELEASE_PERSIST] session=${sess.id} err=${error.message}`);
     res.status(503).json({ error: 'AI 복귀 상태를 저장하지 못했습니다.' });
   }
-});
+}));
 
 // ── 어드민: 메시지 전송 ───────────────────────────────────────
-app.post('/api/admin/message', async (req, res) => {
+app.post('/api/admin/message', withSerializedSession(async (req, res) => {
   const { sessionId, message } = req.body;
   if (!sessionId || !message) return res.status(400).json({ error: 'sessionId, message 필요' });
   // 입력 검증 — 문자열 + 길이 제한
@@ -2141,11 +2193,11 @@ app.post('/api/admin/message', async (req, res) => {
     console.error(`[FAIL_ADMIN_REPLY_SAVE] session=${sess.id} err=${error.message}`);
     res.status(503).json({ error: '메시지를 저장하지 못했습니다.' });
   }
-});
+}));
 
 // ── 고객: 어드민 메시지 읽음 처리 (mark-read) ─────────────────
 // 고객 채팅 탭이 포커스됐을 때 호출 → 어드민 카드의 "안읽음 N" 뱃지 감소
-app.post('/api/session/mark-read', (req, res) => {
+app.post('/api/session/mark-read', withSerializedSession(async (req, res) => {
   const { sessionId, mids } = req.body || {};
   if (!sessionId || !SESSION_ID_RE.test(sessionId) || !sessions.has(sessionId)) {
     return res.status(404).json({ error: 'no session' });
@@ -2159,16 +2211,28 @@ app.post('/api/session/mark-read', (req, res) => {
   const midSet = new Set(
     mids.filter(id => typeof id === 'string' && MID_RE.test(id)).slice(0, 100)
   );
-  let updated = 0;
+  const changed = [];
   for (const m of sess.messages) {
     if (m.fromAdmin && m.mid && midSet.has(m.mid) && !m.read) {
+      changed.push(m);
       m.read = true;
       m.readAt = new Date().toISOString();
-      updated++;
     }
   }
-  res.json({ ok: true, updated });
-});
+  if (changed.length === 0) return res.json({ ok: true, updated: 0 });
+
+  try {
+    await upsertConversation(sess);
+    res.json({ ok: true, updated: changed.length });
+  } catch (error) {
+    for (const message of changed) {
+      message.read = false;
+      delete message.readAt;
+    }
+    console.error(`[FAIL_READ_RECEIPT_SAVE] session=${sessionId} err=${error.message}`);
+    res.status(503).json({ error: '읽음 상태를 저장하지 못했습니다.' });
+  }
+}));
 
 // ── 어드민: 저장된 상담 목록 조회 ────────────────────────────
 app.get('/api/admin/conversations', async (req, res) => {
