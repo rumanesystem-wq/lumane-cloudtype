@@ -154,6 +154,11 @@ const ARCHIVE_KEY  = '루마네_히스토리_아카이브';
 const HISTORY_TS_KEY = '루마네_히스토리_시각';
 const SESSION_EXPIRE = 60 * 60 * 1000; // 1시간
 
+function isSessionIdExpired() {
+  const createdAt = Number((SESSION_ID || '').split('-')[1]);
+  return !Number.isFinite(createdAt) || Date.now() - createdAt > SESSION_EXPIRE;
+}
+
 function saveHistory() {
   try {
     localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
@@ -320,6 +325,8 @@ function startPolling() {
 
       /* admin이 보낸 메시지 표시 */
       for (const msg of (data.pendingMsgs || [])) {
+        const alreadyReceived = msg.mid && history.some(item => item.eventId === msg.mid);
+        if (alreadyReceived) continue;
         hideAdminTyping();
         addMsg('bot', msg.content, { fromAdmin: true });
         // 관리자 메시지 메타를 로컬 화면 기록에도 보존
@@ -933,6 +940,7 @@ async function startChat() {
       archiveCurrent();
       history = [];
       clearHistory();
+      SESSION_ID = generateSessionId();
       clearMessages();
       greet();
       if (serverOnline) { registerSession(); startPolling(); }
@@ -974,6 +982,7 @@ async function startChat() {
       }
     } else {
       /* ── 최초 진입: 인사 ── */
+      if (isSessionIdExpired()) SESSION_ID = generateSessionId();
       greet();
       if (serverOnline) {
         registerSession();
