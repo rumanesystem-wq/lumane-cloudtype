@@ -1,0 +1,19 @@
+'use strict';
+
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+
+test('idempotency keys use non-partial unique indexes for PostgREST upsert inference', () => {
+  const sql = fs.readFileSync(
+    path.join(__dirname, '..', 'migrations', '2026-07-16_add_storage_idempotency_keys.sql'),
+    'utf8',
+  );
+  assert.match(sql, /information_schema\.tables/i);
+  assert.match(sql, /create unique index if not exists quotes_request_id_unique on %I\.quotes \(request_id\)/i);
+  assert.doesNotMatch(sql, /alter table public\.quotes/i);
+  assert.match(sql, /to_regclass\('customer\.install'\) is null/i);
+  assert.match(sql, /unique index if not exists install_source_ref_unique on customer\.install \(source_ref\)/i);
+  assert.doesNotMatch(sql, /where\s+(request_id|source_ref)\s+is\s+not\s+null/i);
+});

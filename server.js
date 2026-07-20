@@ -13,6 +13,17 @@ const Anthropic = require('@anthropic-ai/sdk');
 const { createClient } = require('@supabase/supabase-js');
 const { Client: NotionClient } = require('@notionhq/client');
 const multer = require('multer');
+const { executeSupabase } = require('./lib/supabase-reliability');
+const {
+  ConversationContractError,
+  acceptClientEvent,
+  appendServerMessage,
+  findReply,
+  legacyHistoryToEvent,
+  normalizeStoredMessages,
+} = require('./lib/conversation-contract');
+const { SessionSerializer } = require('./lib/session-serializer');
+const { insertIdempotentQuote } = require('./lib/quote-storage');
 const AdmZip = require('adm-zip');
 const fs   = require('fs');
 const path = require('path');
@@ -150,8 +161,37 @@ app.use('/api/admin', requireAdmin);
 // ── 라이브 세션 관리 (메모리) ─────────────────────────────────
 // 서버 재시작 시 초기화됨. 필요 시 Supabase로 이전 가능.
 const SESSION_ID_RE = /^S-\d{13}-[a-z0-9]{5}$/;
-const VALID_ROLES   = new Set(['user', 'assistant', 'system']);
 const sessions = new Map();
+const sessionSerializer = new SessionSerializer();
+const sessionHydrations = new Map();
+
+function withSerializedSession(handler) {
+  return async (req, res, next) => {
+    const sessionId = req.body?.sessionId;
+    if (!sessionId || !SESSION_ID_RE.test(sessionId)) {
+      try {
+        return await handler(req, res, next);
+      } catch (error) {
+        return next(error);
+      }
+    }
+
+    const release = await sessionSerializer.acquire(sessionId);
+    const safetyTimer = setTimeout(() => {
+      console.error(`[SESSION_LOCK_TIMEOUT] session=${sessionId}`);
+      release();
+    }, 5 * 60 * 1000);
+    safetyTimer.unref?.();
+    try {
+      return await handler(req, res, next);
+    } catch (error) {
+      return next(error);
+    } finally {
+      clearTimeout(safetyTimer);
+      release();
+    }
+  };
+}
 
 // 토큰 사용량 → Supabase에 영구 저장
 async function addTokenUsage(sessionId, usage) {
@@ -166,20 +206,16 @@ async function addTokenUsage(sessionId, usage) {
   sess.tokens.cacheRead  += usage.cache_read_input_tokens || 0;
   sess.tokens.turns      += 1;
 
-  try {
-    await supabase.from('token_stats').upsert({
-      session_id:         sessionId,
-      customer_name:      sess.customerName || null,
-      input_tokens:       sess.tokens.input,
-      output_tokens:      sess.tokens.output,
-      cache_write_tokens: sess.tokens.cacheWrite,
-      cache_read_tokens:  sess.tokens.cacheRead,
-      turns:              sess.tokens.turns,
-      updated_at:         new Date().toISOString(),
-    }, { onConflict: 'session_id' });
-  } catch (err) {
-    console.error('토큰 저장 오류:', err.message);
-  }
+  await executeSupabase('token_stats upsert', () => supabase.from('token_stats').upsert({
+    session_id:         sessionId,
+    customer_name:      sess.customerName || null,
+    input_tokens:       sess.tokens.input,
+    output_tokens:      sess.tokens.output,
+    cache_write_tokens: sess.tokens.cacheWrite,
+    cache_read_tokens:  sess.tokens.cacheRead,
+    turns:              sess.tokens.turns,
+    updated_at:         new Date().toISOString(),
+  }, { onConflict: 'session_id' }));
 }
 // 구조: Map<sessionId, {
 //   id, mode: 'ai'|'admin', messages: [],
@@ -243,6 +279,67 @@ function getOrCreateSession(sessionId) {
     });
   }
   return sessions.get(sessionId);
+}
+
+async function ensureSessionHydrated(sessionId, isTest = false) {
+  if (sessions.has(sessionId)) return sessions.get(sessionId);
+  if (sessionHydrations.has(sessionId)) return sessionHydrations.get(sessionId);
+
+  const hydration = (async () => {
+    const table = isTest ? 'test_conversations' : 'conversations';
+    const row = await executeSupabase('conversation hydrate', () => supabase
+      .from(table)
+      .select('session_id, mode, messages, started_at, customer_name, phone, src, src2, visitor_key')
+      .eq('session_id', sessionId)
+      .is('deleted_at', null)
+      .maybeSingle());
+    const sess = getOrCreateSession(sessionId);
+    if (row) {
+      sess.mode = row.mode === 'admin' ? 'admin' : 'ai';
+      sess.messages = normalizeStoredMessages(row.messages);
+      sess.customerName = row.customer_name || null;
+      sess.customerNameIsTemp = !row.customer_name || TEMP_NAME_RE.test(row.customer_name);
+      sess.customerPhone = row.phone || null;
+      sess.startedAt = row.started_at ? new Date(row.started_at) : new Date();
+      sess.src = row.src || null;
+      sess.src2 = row.src2 || null;
+      sess.visitor_key = row.visitor_key || null;
+      sess.isTest = isTest;
+      sess.slackNotified = true;
+      const quoteReply = [...sess.messages].reverse().find(message =>
+        message.role === 'assistant' && message.content &&
+        (message.content.includes('총 합계') || message.content.includes('견적서') || message.content.includes('주문내역'))
+      );
+      if (quoteReply && !isTest) {
+        const quoteNumber = 'KB-AI-' + sessionId.slice(-8).toUpperCase();
+        const quoteRow = await executeSupabase('AI quote hydrate', () => supabase
+          .from('quotes')
+          .select('quote_number')
+          .eq('quote_number', quoteNumber)
+          .maybeSingle());
+        let installRow = null;
+        try {
+          installRow = await executeSupabase('customer.install hydrate', () => supabaseCustomer
+            .from('install')
+            .select('source_ref')
+            .eq('source_ref', quoteNumber)
+            .maybeSingle());
+        } catch (error) {
+          console.warn('customer.install 복구 조회 건너뜀:', error.message);
+        }
+        sess.lastQuoteReply = quoteReply.content;
+        sess.quoteNotified = !!quoteRow;
+        sess.customerInstallSaved = !!installRow;
+      }
+    }
+    return sess;
+  })();
+  sessionHydrations.set(sessionId, hydration);
+  try {
+    return await hydration;
+  } finally {
+    sessionHydrations.delete(sessionId);
+  }
 }
 
 // ── 대화 내용 Supabase 저장 ─────────────────────────────────
@@ -318,7 +415,9 @@ async function autoRegisterQuote(sess, reply) {
     source:         'AI상담',
   };
 
-  await supabase.from('quotes').upsert(payload, { onConflict: 'quote_number' });
+  await executeSupabase('AI quote upsert', () =>
+    supabase.from('quotes').upsert(payload, { onConflict: 'quote_number' })
+  );
   sess.lastQuoteReply = reply;
   console.log(`✅ AI 견적 자동 등록: ${quoteNumber} (${payload.name})`);
 
@@ -337,13 +436,14 @@ async function autoRegisterQuote(sess, reply) {
   if (name && phone) {
     try {
       const now = new Date().toISOString();
-      const { error: custUpsertErr } = await supabaseCustomer.from('customer').upsert(
-        { name, phone, saved_at: now, last_changed_at: now },
-        { onConflict: 'phone' }
+      await executeSupabase('AI customer upsert', () =>
+        supabaseCustomer.from('customer').upsert(
+          { name, phone, saved_at: now, last_changed_at: now },
+          { onConflict: 'phone' }
+        )
       );
-      if (custUpsertErr) throw custUpsertErr;
       if (!sess.customerInstallSaved) {
-        await supabaseCustomer.from('install').insert([{
+        await executeSupabase('AI customer.install upsert', () => supabaseCustomer.from('install').upsert([{
           name,
           phone,
           status:           '접수',
@@ -357,7 +457,8 @@ async function autoRegisterQuote(sess, reply) {
           inflow_date:      now.split('T')[0],
           saved_at:         now,
           last_changed_at:  now,
-        }]);
+          source_ref:       quoteNumber,
+        }], { onConflict: 'source_ref' }));
         sess.customerInstallSaved = true;
         console.log(`✅ customer 스키마 저장 (AI상담): ${name} (${phone})`);
       } else {
@@ -365,6 +466,7 @@ async function autoRegisterQuote(sess, reply) {
       }
     } catch (custErr) {
       console.error('customer 스키마 저장 오류 (quotes는 저장됨):', custErr.message);
+      throw custErr;
     }
   }
 }
@@ -375,41 +477,44 @@ async function upsertConversation(sess) {
   // 고객 메시지가 하나도 없으면 저장하지 않음 (인사만 보고 나간 경우)
   const userMsgCount = sess.messages.filter(m => m.role === 'user').length;
   if (userMsgCount === 0) return;
+  const orderMsg = [...sess.messages].reverse().find(m =>
+    m.role === 'assistant' && m.content &&
+    (m.content.includes('주문서') || m.content.includes('견적서') || m.content.includes('주문내역'))
+  );
+  const parsed = orderMsg ? parseOrderSheet(orderMsg.content) : {};
+  const estimatedPrice = parsed.estimated_price || null;
+
+  const table = sess.isTest ? 'test_conversations' : 'conversations';
+  const payload = {
+    session_id:      sess.id,
+    save_reason:     'realtime',
+    customer_name:   parsed.customer_name || sess.customerName || null,
+    phone:           parsed.phone || null,
+    region:          parsed.region || null,
+    size_raw:        parsed.size_raw || null,
+    layout:          parsed.layout || null,
+    options_text:    parsed.options_text || null,
+    frame_color:     parsed.frame_color || null,
+    shelf_color:     parsed.shelf_color || null,
+    memo:            null,
+    estimated_price: estimatedPrice || null,
+    message_count:   sess.messages.length,
+    started_at:      sess.startedAt,
+    messages:        sess.messages,
+    src:             sess.src || null,
+    src2:            sess.src2 || null,
+    mode:            sess.mode || 'ai',  // #21: admin 모드 영속화 (마이그레이션 2026-05-15)
+    // visitor_key는 값 있을 때만 포함 — NULL 덮어쓰기 방지 (재방문 추적용 영구 ID 보존)
+    ...(sess.visitor_key ? { visitor_key: sess.visitor_key } : {}),
+  };
+
   try {
-    const orderMsg = [...sess.messages].reverse().find(m =>
-      m.role === 'assistant' && m.content &&
-      (m.content.includes('주문서') || m.content.includes('견적서') || m.content.includes('주문내역'))
+    await executeSupabase('conversation upsert', () =>
+      supabase.from(table).upsert(payload, { onConflict: 'session_id' })
     );
-    const parsed = orderMsg ? parseOrderSheet(orderMsg.content) : {};
-    const estimatedPrice = parsed.estimated_price || null;
-
-    const table = sess.isTest ? 'test_conversations' : 'conversations';
-    const payload = {
-      session_id:      sess.id,
-      save_reason:     'realtime',
-      customer_name:   parsed.customer_name || sess.customerName || null,
-      phone:           parsed.phone || null,
-      region:          parsed.region || null,
-      size_raw:        parsed.size_raw || null,
-      layout:          parsed.layout || null,
-      options_text:    parsed.options_text || null,
-      frame_color:     parsed.frame_color || null,
-      shelf_color:     parsed.shelf_color || null,
-      memo:            null,
-      estimated_price: estimatedPrice || null,
-      message_count:   sess.messages.length,
-      started_at:      sess.startedAt,
-      messages:        sess.messages,
-      src:             sess.src || null,
-      src2:            sess.src2 || null,
-      mode:            sess.mode || 'ai',  // #21: admin 모드 영속화 (마이그레이션 2026-05-15)
-      // visitor_key는 값 있을 때만 포함 — NULL 덮어쓰기 방지 (재방문 추적용 영구 ID 보존)
-      ...(sess.visitor_key ? { visitor_key: sess.visitor_key } : {}),
-    };
-
-    await supabase.from(table).upsert(payload, { onConflict: 'session_id' });
   } catch (err) {
     console.error(`[FAIL_UPSERT] session=${sess.id} msgCount=${sess.messages.length} err=${err.message}`);
+    throw err;
   }
 }
 
@@ -420,9 +525,9 @@ async function saveConversation(sess, reason) {
     // 실시간 저장 데이터 최신화 + save_reason 업데이트
     await upsertConversation(sess);
     const saveTable = sess.isTest ? 'test_conversations' : 'conversations';
-    await supabase.from(saveTable)
+    await executeSupabase('conversation save_reason update', () => supabase.from(saveTable)
       .update({ save_reason: reason })
-      .eq('session_id', sess.id);
+      .eq('session_id', sess.id));
 
     console.log(`💾 대화 저장 완료 (${reason}): ${sess.id.slice(0, 16)}…`);
 
@@ -659,9 +764,11 @@ const STORAGE_BUCKET = 'lumane-uploads';
 // 서버 시작 시 버킷 자동 생성 (없을 때만)
 (async () => {
   try {
-    const { data: buckets } = await supabase.storage.listBuckets();
+    const buckets = await executeSupabase('storage bucket list', () => supabase.storage.listBuckets());
     if (!buckets?.find(b => b.name === STORAGE_BUCKET)) {
-      await supabase.storage.createBucket(STORAGE_BUCKET, { public: true });
+      await executeSupabase('storage bucket create', () =>
+        supabase.storage.createBucket(STORAGE_BUCKET, { public: true })
+      );
       console.log(`✅ Supabase Storage 버킷 생성: ${STORAGE_BUCKET}`);
     }
   } catch (e) {
@@ -1031,13 +1138,18 @@ async function buildApiMessages(messages) {
 }
 
 // ── 채팅 API ──────────────────────────────────────────────────
-app.post('/api/chat', chatRateLimit, async (req, res) => {
-  // messages 는 fromAdmin 보존 merge 단계에서 재할당되므로 let
-  let { messages } = req.body;
+app.post('/api/chat', chatRateLimit, withSerializedSession(async (req, res) => {
   const { sessionId, syncOnly, isTest } = req.body;
+  let event = req.body.event;
+  let messages = [];
+  let clientMessage = null;
 
-  if (!messages || !Array.isArray(messages)) {
-    return res.status(400).json({ error: 'messages 배열이 필요합니다.' });
+  // 캐시된 구형 브라우저 호환: 전체 이력을 신뢰하지 않고 마지막 user 입력 하나만 이벤트로 변환한다.
+  if (!event && Array.isArray(req.body.messages) && req.body.messages.length > 0) {
+    event = legacyHistoryToEvent(sessionId, req.body.messages);
+    if (!event) return res.status(400).json({ error: '유효한 user 메시지가 없습니다.' });
+  } else if (req.body.messages !== undefined && !Array.isArray(req.body.messages)) {
+    return res.status(400).json({ error: '잘못된 messages 형식입니다.' });
   }
 
   // H4 fix: 어드민이 삭제한 sessionId는 1시간 내 채팅 차단
@@ -1045,41 +1157,40 @@ app.post('/api/chat', chatRateLimit, async (req, res) => {
     return res.status(410).json({ error: '이 세션은 종료되었습니다.' });
   }
 
-  // messages 항목 검증 (role·content 형식)
-  const validMessages = messages.every(m =>
-    VALID_ROLES.has(m.role) &&
-    typeof m.content === 'string' &&
-    m.content.length <= 20000
-  );
-  if (!validMessages) {
-    return res.status(400).json({ error: '잘못된 messages 형식입니다.' });
-  }
-
-  // 세션이 있으면 메시지 동기화
+  // 세션이 있으면 DB 정본을 먼저 hydrate하고 신규 user 이벤트만 append한다.
   if (sessionId) {
     // sessionId 형식 검증
     if (!SESSION_ID_RE.test(sessionId)) {
       return res.status(400).json({ error: '유효하지 않은 sessionId입니다.' });
     }
 
-    const sess = getOrCreateSession(sessionId);
-
-    // fromAdmin 플래그 보존 — 클라가 fromAdmin/time 을 누락한 채 messages 를 보내도
-    // 서버 sess.messages 에 박혀 있던 fromAdmin: true 메타를 동일 content 매칭으로 복원.
-    // (구버전 클라/라운드트립 누락 방어 — 어드민 메시지 식별성 영구 손실 방지)
-    const serverAdminMsgs = (sess.messages || []).filter(m => m.fromAdmin && m.role === 'assistant');
-    if (serverAdminMsgs.length > 0) {
-      const remaining = [...serverAdminMsgs];
-      messages = messages.map(m => {
-        if (m.fromAdmin || m.role !== 'assistant') return m;
-        const idx = remaining.findIndex(s => s.content === m.content);
-        if (idx === -1) return m;
-        const matched = remaining.splice(idx, 1)[0];
-        return { ...m, fromAdmin: true, time: m.time || matched.time };
-      });
+    let sess;
+    try {
+      sess = await ensureSessionHydrated(sessionId, isTest === true);
+      if (event) {
+        const accepted = acceptClientEvent(sess, event);
+        clientMessage = accepted.message;
+        if (!accepted.isNew) {
+          const priorReply = findReply(sess, event.id);
+          if (priorReply) {
+            try {
+              await upsertConversation(sess);
+              await autoRegisterQuote(sess, priorReply.content);
+              return res.json({ message: priorReply.content, messageId: priorReply.id, deduplicated: true });
+            } catch (error) {
+              return res.status(503).json({ error: '대화를 저장하지 못했습니다. 잠시 후 다시 시도해주세요.' });
+            }
+          }
+        }
+      }
+    } catch (error) {
+      if (error instanceof ConversationContractError) {
+        return res.status(error.status).json({ error: error.message });
+      }
+      console.error(`[FAIL_HYDRATE] session=${sessionId} err=${error.message}`);
+      return res.status(503).json({ error: '대화 상태를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.' });
     }
-
-    sess.messages = messages;
+    messages = sess.messages;
     sess.lastActivity = new Date();
     if (!syncOnly) sess.lastMessageAt = new Date();
     if (isTest === true) sess.isTest = true;
@@ -1105,14 +1216,13 @@ app.post('/api/chat', chatRateLimit, async (req, res) => {
           sess.startedAt = parsed;
         }
       }
-      upsertConversation(sess).catch(e => {
-        console.error(`[FAIL_SYNC_1] session=${sess.id} err=${e.message}`);
-        setTimeout(() => upsertConversation(sess).catch(e2 => {
-          console.error(`[FAIL_SYNC_2] session=${sess.id} err=${e2.message}`);
-          notifySlack('DB저장실패', '💾', `ctx=SYNC session=${sess.id.slice(0, 8)}\nname=${e2.name || '?'} code=${e2.code || '?'}\nerr=${e2.message}`);
-        }), 2000);
-      });
-      return res.json({ ok: true, synced: messages.length });
+      try {
+        await upsertConversation(sess);
+        return res.json({ ok: true, appended: clientMessage ? 1 : 0 });
+      } catch (error) {
+        notifySlack('DB저장실패', '💾', `ctx=SYNC session=${sess.id.slice(0, 8)}\nname=${error.name || '?'} code=${error.code || '?'}\nerr=${error.message}`);
+        return res.status(503).json({ error: '메시지를 저장하지 못했습니다. 잠시 후 다시 시도해주세요.' });
+      }
     }
 
     // ── Slack 모니터 알림 (fire-and-forget, 모니터링 목적) ──
@@ -1135,41 +1245,65 @@ app.post('/api/chat', chatRateLimit, async (req, res) => {
     if (sess.mode === 'admin') {
       // user 메시지를 DB 에 즉시 보존 (fire-and-forget, 재시도 + Slack 알림)
       // — admin 모드는 AI 응답 경로의 upsertConversation 을 안 거치므로 여기서 명시적으로 저장
-      upsertConversation(sess).catch(e => {
-        console.error(`[FAIL_ADMIN_USER_SAVE_1] session=${sess.id} err=${e.message}`);
-        setTimeout(() => upsertConversation(sess).catch(e2 => {
-          console.error(`[FAIL_ADMIN_USER_SAVE_2] session=${sess.id} err=${e2.message}`);
-          notifySlack('DB저장실패', '💾', `ctx=ADMIN_USER session=${sess.id.slice(0, 8)}\nname=${e2.name || '?'} code=${e2.code || '?'}\nerr=${e2.message}`);
-        }), 2000);
-      });
-      return res.json({ message: null, adminMode: true });
+      try {
+        await upsertConversation(sess);
+        return res.json({ message: null, adminMode: true });
+      } catch (error) {
+        notifySlack('DB저장실패', '💾', `ctx=ADMIN_USER session=${sess.id.slice(0, 8)}\nname=${error.name || '?'} code=${error.code || '?'}\nerr=${error.message}`);
+        return res.status(503).json({ error: '메시지를 저장하지 못했습니다. 잠시 후 다시 시도해주세요.' });
+      }
+    }
+  }
+
+  // AI 호출 전에 user 이벤트를 먼저 commit해 프로세스 종료·LLM 장애에서도 입력을 보존한다.
+  if (sessionId && clientMessage) {
+    try {
+      await upsertConversation(sessions.get(sessionId));
+    } catch (error) {
+      notifySlack('DB저장실패', '💾', `ctx=USER_EVENT session=${sessionId.slice(0, 8)}\nname=${error.name || '?'} code=${error.code || '?'}\nerr=${error.message}`);
+      return res.status(503).json({ error: '메시지를 저장하지 못했습니다. 잠시 후 다시 시도해주세요.' });
     }
   }
 
   // ── Haiku 사전 필터: 마지막 user 메시지만 검사 ──────────────
-  const lastUserMsg = [...messages].reverse().find(m => m.role === 'user');
+  const lastUserMsg = clientMessage;
   if (lastUserMsg) {
     const relevant = await isRelevantMessage(lastUserMsg.content);
     if (!relevant) {
       console.warn(`🚫 관련 없는 메시지 차단 (IP: ${req.ip}): "${lastUserMsg.content.slice(0, 40)}"`);
       const canned = '죄송해요, 저는 케이트블랑 드레스룸 상담만 도와드릴 수 있어요 😊\n드레스룸 관련 질문이 있으시면 편하게 말씀해 주세요!';
       if (sessionId && sessions.has(sessionId)) {
-        sessions.get(sessionId).messages.push({ role: 'assistant', content: canned });
-        sessions.get(sessionId).lastActivity = new Date();
+        const sess = sessions.get(sessionId);
+        const saved = appendServerMessage(sess, {
+          id: `filter_${clientMessage.id}`,
+          content: canned,
+          replyTo: clientMessage.id,
+        });
+        sess.lastActivity = new Date();
+        try {
+          await upsertConversation(sess);
+          return res.json({ message: canned, messageId: saved.id });
+        } catch (error) {
+          return res.status(503).json({ error: '응답을 저장하지 못했습니다. 잠시 후 다시 시도해주세요.' });
+        }
       }
       return res.json({ message: canned });
     }
   }
 
   // 첫 인사 — API 호출 없이 고정 문구 반환 (토큰 절약)
-  if (messages.length === 0) {
+  if (!event && messages.length === 0) {
     const greeting = '안녕하세요~ 케이트블랑 드레스룸 상담 담당 루마네예요 :)\n\n무엇을 도와드릴까요?';
     if (sessionId && sessions.has(sessionId)) {
       const sess = sessions.get(sessionId);
-      sess.messages.push({ role: 'assistant', content: greeting, ts: new Date().toISOString() });
+      appendServerMessage(sess, { id: `greet_${sessionId}`, content: greeting });
       sess.lastActivity = new Date();
     }
-    return res.json({ message: greeting });
+    return res.json({ message: greeting, messageId: `greet_${sessionId}` });
+  }
+
+  if (!clientMessage) {
+    return res.status(400).json({ error: '신규 event가 필요합니다.' });
   }
 
   // ts/mid 등 extra 필드 제거 + 긴 대화 자동 요약
@@ -1212,7 +1346,11 @@ app.post('/api/chat', chatRateLimit, async (req, res) => {
     // 세션에 AI 응답 저장 + 실시간 Supabase upsert
     if (sessionId && sessions.has(sessionId)) {
       const sess = sessions.get(sessionId);
-      sess.messages.push({ role: 'assistant', content: reply, ts: new Date().toISOString() });
+      const savedReply = appendServerMessage(sess, {
+        id: `ai_${clientMessage.id}`,
+        content: reply,
+        replyTo: clientMessage.id,
+      });
       sess.lastActivity = new Date();
 
       // AI 응답에서 "OO 고객님" 패턴으로 이름 추출 — 임시 이름인 경우만 업데이트
@@ -1240,40 +1378,48 @@ app.post('/api/chat', chatRateLimit, async (req, res) => {
         }
       }
 
-      upsertConversation(sess).catch(e => {
-        console.error(`[FAIL_AI_SAVE_1] session=${sess.id} err=${e.message}`);
-        setTimeout(() => upsertConversation(sess).catch(e2 => {
-          console.error(`[FAIL_AI_SAVE_2] session=${sess.id} err=${e2.message}`);
-          notifySlack('DB저장실패', '💾', `ctx=AI_SAVE session=${sess.id.slice(0, 8)}\nname=${e2.name || '?'} code=${e2.code || '?'}\nerr=${e2.message}`);
-        }), 2000);
-      });
-      autoRegisterQuote(sess, reply).catch(e => {
-        console.error('견적 자동 등록 실패:', e.message);
-        notifySlack('DB저장실패', '💾', `ctx=AUTO_QUOTE session=${sess.id.slice(0, 8)}\nname=${e.name || '?'} code=${e.code || '?'}\nerr=${e.message}`);
-      });
+      await upsertConversation(sess);
+      await autoRegisterQuote(sess, reply);
+      res.json({ message: reply, messageId: savedReply.id });
+      return;
     }
 
     res.json({ message: reply });
 
   } catch (err) {
+    if (err.name === 'SupabaseOperationError') {
+      console.error(`[FAIL_CHAT_COMMIT] session=${sessionId} err=${err.message}`);
+      notifySlack('DB저장실패', '💾', `ctx=CHAT_COMMIT session=${sessionId.slice(0, 8)}\nname=${err.name || '?'} code=${err.code || '?'}\nerr=${err.message}`);
+      return res.status(503).json({ error: '대화를 저장하지 못했습니다. 잠시 후 다시 시도해주세요.' });
+    }
     console.error(`${AI_PROVIDER} API 오류:`, err.message);
 
     // 고객에게는 담당자 연결 안내 메시지 표시 — 세션당 최초 1회만
     const sess = sessionId && sessions.has(sessionId) ? sessions.get(sessionId) : null;
     if (sess && !sess.fallbackSent) {
       const fallback = '잠시만요! 😊\n담당자를 연결해 드리겠습니다.\n곧 직접 안내해 드릴게요, 조금만 기다려 주세요 🙏';
-      sess.messages.push({ role: 'assistant', content: fallback });
+      const savedFallback = appendServerMessage(sess, {
+        id: `fallback_${clientMessage?.id || Date.now()}`,
+        content: fallback,
+        replyTo: clientMessage?.id,
+      });
       sess.lastActivity = new Date();
       sess.fallbackSent = true;
       // Slack 알림 — 세션당 1회 (sess.fallbackSent 가드와 동일 조건)
       // err.status (HTTP, 401/429/529 등), err.name (RateLimitError/OverloadedError 등) 정확히 노출
       notifySlack('LLM호출실패', '🚨', `provider=${AI_PROVIDER} status=${err.status ?? '?'} name=${err.name ?? '?'}\nsession=${sess.id.slice(0, 8)}\nerr=${err.message}`);
-      return res.json({ message: fallback });
+      try {
+        await upsertConversation(sess);
+      } catch (saveError) {
+        console.error(`[FAIL_FALLBACK_SAVE] session=${sess.id} err=${saveError.message}`);
+        return res.status(503).json({ error: '대화를 저장하지 못했습니다. 잠시 후 다시 시도해주세요.' });
+      }
+      return res.json({ message: fallback, messageId: savedFallback.id });
     }
     // 이미 fallback을 보낸 세션: 빈 응답 (클라이언트에서 무시)
     res.json({ message: '' });
   }
-});
+}));
 
 // ── 세션 등록 API ─────────────────────────────────────────────
 app.post('/api/session/register', async (req, res) => {
@@ -1303,7 +1449,13 @@ app.post('/api/session/register', async (req, res) => {
   if (isSessionBlocked(sessionId)) {
     return res.status(410).json({ error: '이 세션은 어드민에 의해 종료되었습니다. 새 세션으로 다시 시도하세요.' });
   }
-  const sess = getOrCreateSession(sessionId);
+  let sess;
+  try {
+    sess = await ensureSessionHydrated(sessionId, isTest === true);
+  } catch (error) {
+    console.error(`[FAIL_REGISTER_HYDRATE] session=${sessionId} err=${error.message}`);
+    return res.status(503).json({ error: '대화 상태를 불러오지 못했습니다.' });
+  }
   if (nickname && typeof nickname === 'string') {
     const trimmed = nickname.trim().slice(0, 20);
     sess.nickname = trimmed;
@@ -1920,7 +2072,7 @@ app.post('/api/session/typing', (req, res) => {
 });
 
 // ── 어드민: 난입 (AI → admin 모드 전환) ──────────────────────
-app.post('/api/admin/takeover', (req, res) => {
+app.post('/api/admin/takeover', async (req, res) => {
   const { sessionId } = req.body;
   const sess = sessions.get(sessionId);
   if (!sess) return res.status(404).json({ error: '세션 없음' });
@@ -1928,15 +2080,18 @@ app.post('/api/admin/takeover', (req, res) => {
   sess.mode = 'admin';
   sess.lastActivity = new Date();
   console.log(`🎯 Admin 난입: 세션 ${sessionId}`);
-  // #21: 서버 재시작 대비 DB 영속화 (fire-and-forget)
-  upsertConversation(sess).catch(e => {
-    console.error(`[FAIL_TAKEOVER_PERSIST] session=${sess.id} err=${e.message}`);
-  });
-  res.json({ ok: true });
+  try {
+    await upsertConversation(sess);
+    res.json({ ok: true });
+  } catch (error) {
+    sess.mode = 'ai';
+    console.error(`[FAIL_TAKEOVER_PERSIST] session=${sess.id} err=${error.message}`);
+    res.status(503).json({ error: '상담원 전환 상태를 저장하지 못했습니다.' });
+  }
 });
 
 // ── 어드민: 돌려주기 (admin → AI 모드 복귀) ─────────────────
-app.post('/api/admin/release', (req, res) => {
+app.post('/api/admin/release', async (req, res) => {
   const { sessionId } = req.body;
   const sess = sessions.get(sessionId);
   if (!sess) return res.status(404).json({ error: '세션 없음' });
@@ -1944,15 +2099,18 @@ app.post('/api/admin/release', (req, res) => {
   sess.mode = 'ai';
   sess.lastActivity = new Date();
   console.log(`🤖 AI 복귀: 세션 ${sessionId}`);
-  // #21: 서버 재시작 대비 DB 영속화 (fire-and-forget)
-  upsertConversation(sess).catch(e => {
-    console.error(`[FAIL_RELEASE_PERSIST] session=${sess.id} err=${e.message}`);
-  });
-  res.json({ ok: true });
+  try {
+    await upsertConversation(sess);
+    res.json({ ok: true });
+  } catch (error) {
+    sess.mode = 'admin';
+    console.error(`[FAIL_RELEASE_PERSIST] session=${sess.id} err=${error.message}`);
+    res.status(503).json({ error: 'AI 복귀 상태를 저장하지 못했습니다.' });
+  }
 });
 
 // ── 어드민: 메시지 전송 ───────────────────────────────────────
-app.post('/api/admin/message', (req, res) => {
+app.post('/api/admin/message', async (req, res) => {
   const { sessionId, message } = req.body;
   if (!sessionId || !message) return res.status(400).json({ error: 'sessionId, message 필요' });
   // 입력 검증 — 문자열 + 길이 제한
@@ -1974,15 +2132,15 @@ app.post('/api/admin/message', (req, res) => {
 
   // 어드민 답변을 DB 에 즉시 보존 (fire-and-forget, 재시도 + Slack 알림)
   // — admin 모드는 /api/chat 의 upsertConversation 을 안 거치므로 여기서 명시적으로 저장
-  upsertConversation(sess).catch(e => {
-    console.error(`[FAIL_ADMIN_REPLY_SAVE_1] session=${sess.id} err=${e.message}`);
-    setTimeout(() => upsertConversation(sess).catch(e2 => {
-      console.error(`[FAIL_ADMIN_REPLY_SAVE_2] session=${sess.id} err=${e2.message}`);
-      notifySlack('DB저장실패', '💾', `ctx=ADMIN_REPLY session=${sess.id.slice(0, 8)}\nname=${e2.name || '?'} code=${e2.code || '?'}\nerr=${e2.message}`);
-    }), 2000);
-  });
-
-  res.json({ ok: true, mid });
+  try {
+    await upsertConversation(sess);
+    res.json({ ok: true, mid });
+  } catch (error) {
+    sess.pendingAdminMsgs = sess.pendingAdminMsgs.filter(item => item.mid !== mid);
+    sess.messages = sess.messages.filter(item => item.mid !== mid);
+    console.error(`[FAIL_ADMIN_REPLY_SAVE] session=${sess.id} err=${error.message}`);
+    res.status(503).json({ error: '메시지를 저장하지 못했습니다.' });
+  }
 });
 
 // ── 고객: 어드민 메시지 읽음 처리 (mark-read) ─────────────────
@@ -2218,18 +2376,18 @@ app.delete('/api/admin/sessions/:sessionId', requireAdmin, async (req, res) => {
   const sessionId = req.params.sessionId;
   if (!sessionId) return res.status(400).json({ error: 'sessionId 필요' });
   try {
-    // 메모리 세션은 제거 (어차피 휘발성, soft-delete 의미 없음)
-    const existed = sessions.delete(sessionId);
-    // H4 fix: blocklist에 등록 — 같은 sessionId로 1시간 내 재접속 차단
-    markSessionDeleted(sessionId);
-    // DB는 soft-delete (양 테이블 병렬)
+    // DB soft-delete가 모두 확인된 뒤에만 메모리 제거/차단 상태를 확정한다.
     const nowIso = new Date().toISOString();
-    const [r1, r2] = await Promise.allSettled([
-      supabase.from('conversations').update({ deleted_at: nowIso }).eq('session_id', sessionId),
-      supabase.from('test_conversations').update({ deleted_at: nowIso }).eq('session_id', sessionId),
+    await Promise.all([
+      executeSupabase('conversation soft-delete', () =>
+        supabase.from('conversations').update({ deleted_at: nowIso }).eq('session_id', sessionId)
+      ),
+      executeSupabase('test conversation soft-delete', () =>
+        supabase.from('test_conversations').update({ deleted_at: nowIso }).eq('session_id', sessionId)
+      ),
     ]);
-    if (r1.status === 'rejected' || r1.value?.error) console.warn('conversations soft-delete 경고:', r1.reason?.message || r1.value?.error?.message);
-    if (r2.status === 'rejected' || r2.value?.error) console.warn('test_conversations soft-delete 경고:', r2.reason?.message || r2.value?.error?.message);
+    const existed = sessions.delete(sessionId);
+    markSessionDeleted(sessionId);
     console.log(`🗑 라이브 세션 soft-delete: ${sessionId} (memory=${existed})`);
     res.json({ ok: true });
   } catch (err) {
@@ -2546,10 +2704,13 @@ app.post('/api/quote', chatRateLimit, async (req, res) => {
               photoSkipped = 'format';
               console.warn('[QUOTE_PHOTO_FORMAT] 매직바이트 불일치 — 사진 미저장');
             } else {
-              const fname = `quote-${Date.now()}-${crypto.randomBytes(3).toString('hex')}.${ext}`;
+              const requestId = typeof b.request_id === 'string' ? b.request_id : '';
+              const fname = requestId
+                ? `quote-${requestId}.${ext}`
+                : `quote-${Date.now()}-${crypto.randomBytes(3).toString('hex')}.${ext}`;
               const { error: upErr } = await supabase.storage
                 .from(STORAGE_BUCKET)
-                .upload(fname, buf, { contentType: `image/${m[1]}`, upsert: false });
+                .upload(fname, buf, { contentType: `image/${m[1]}`, upsert: !!requestId });
               if (!upErr) {
                 const { data: { publicUrl } } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(fname);
                 photoUrl = publicUrl;
@@ -2571,8 +2732,14 @@ app.post('/api/quote', chatRateLimit, async (req, res) => {
       ? `${memoBase}${memoBase ? '\n\n' : ''}[첨부 사진] ${photoUrl}`
       : memoBase;
 
+    const requestId = typeof b.request_id === 'string' && /^[0-9a-f-]{36}$/i.test(b.request_id)
+      ? b.request_id
+      : null;
     const payload = {
-      quote_number:   'KB-' + new Date().toISOString().slice(0,10).replace(/-/g,'') + '-' + crypto.randomBytes(3).toString('hex').toUpperCase(),
+      quote_number:   requestId
+        ? 'KB-' + new Date().toISOString().slice(0,10).replace(/-/g,'') + '-' + requestId.replace(/-/g, '').slice(0, 6).toUpperCase()
+        : 'KB-' + new Date().toISOString().slice(0,10).replace(/-/g,'') + '-' + crypto.randomBytes(3).toString('hex').toUpperCase(),
+      request_id:     requestId,
       name:           str(b.name, 50),
       phone:          phoneRaw,
       region:         str(b.region, 200),
@@ -2591,19 +2758,42 @@ app.post('/api/quote', chatRateLimit, async (req, res) => {
       has_photo:      photoUrl ? '사진있음' : str(b.has_photo, 20),
     };
 
-    const { data, error } = await supabase
-      .from('quotes')
-      .insert([payload])
-      .select()
-      .single();
-    if (error) throw error;
+    let data;
+    let deduplicated = false;
+    if (requestId) {
+      const stored = await insertIdempotentQuote({
+        payload,
+        insert: candidate => executeSupabase('form quote insert', () => supabase
+          .from('quotes')
+          .insert([candidate])
+          .select()
+          .single()),
+        findByRequestId: id => executeSupabase('form quote dedup lookup', () => supabase
+          .from('quotes')
+          .select('*')
+          .eq('request_id', id)
+          .maybeSingle()),
+        regenerateQuoteNumber: () =>
+          'KB-' + new Date().toISOString().slice(0,10).replace(/-/g,'') + '-' + crypto.randomBytes(3).toString('hex').toUpperCase(),
+      });
+      data = stored.data;
+      deduplicated = stored.deduplicated;
+      Object.assign(payload, stored.payload);
+    } else {
+      data = await executeSupabase('legacy form quote insert', () => supabase
+        .from('quotes')
+        .insert([payload])
+        .select()
+        .single(), { maxAttempts: 1 });
+    }
+    payload.quote_number = data?.quote_number || payload.quote_number;
 
     console.log(`✅ 견적 폼 접수: ${payload.quote_number} (${payload.name})`);
 
     // 응답 photo_skipped 플래그는 아래 res.json에서 같이 보냄
 
     // Slack 알림 — 폼 제출은 매 건마다 발사 (quote_number 매번 새로 발급)
-    {
+    if (!deduplicated) {
       const parts = [payload.quote_number];
       if (payload.name)        parts.push(payload.name);
       if (payload.region)      parts.push(payload.region);
@@ -2616,12 +2806,13 @@ app.post('/api/quote', chatRateLimit, async (req, res) => {
     if (payload.phone) {
       try {
         const now = new Date().toISOString();
-        const { error: custUpsertErr } = await supabaseCustomer.from('customer').upsert(
-          { name: payload.name, phone: payload.phone, saved_at: now, last_changed_at: now },
-          { onConflict: 'phone' }
+        await executeSupabase('form customer upsert', () =>
+          supabaseCustomer.from('customer').upsert(
+            { name: payload.name, phone: payload.phone, saved_at: now, last_changed_at: now },
+            { onConflict: 'phone' }
+          )
         );
-        if (custUpsertErr) throw custUpsertErr;
-        await supabaseCustomer.from('install').insert([{
+        await executeSupabase('form customer.install upsert', () => supabaseCustomer.from('install').upsert([{
           name:             payload.name,
           phone:            payload.phone,
           status:           '접수',
@@ -2638,18 +2829,27 @@ app.post('/api/quote', chatRateLimit, async (req, res) => {
           inflow_date:      now.split('T')[0],
           saved_at:         now,
           last_changed_at:  now,
-        }]);
+          source_ref:       payload.quote_number,
+        }], { onConflict: 'source_ref' }));
         console.log(`✅ customer 스키마 저장 (폼제출): ${payload.name} (${payload.phone})`);
       } catch (custErr) {
         console.error('customer 스키마 저장 오류 (quotes는 저장됨):', custErr.message);
+        throw custErr;
       }
     } else {
       console.log('customer 스키마 저장 건너뜀 (phone 없음)');
     }
 
-    res.json({ ok: true, quote_number: payload.quote_number, id: data?.id, photo_skipped: photoSkipped || null });
+    res.json({
+      ok: true,
+      quote_number: data?.quote_number || payload.quote_number,
+      id: data?.id,
+      deduplicated,
+      photo_skipped: photoSkipped || null,
+    });
   } catch (err) {
     console.error('견적 폼 접수 오류:', err.message);
+    notifySlack('DB저장실패', '💾', `ctx=QUOTE_FORM name=${err.name || '?'} code=${err.code || '?'}\nerr=${err.message}`);
     res.status(500).json({ error: '저장 실패' });
   }
 });

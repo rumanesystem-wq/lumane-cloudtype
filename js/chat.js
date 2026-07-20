@@ -83,8 +83,69 @@ let pendingConfirm = false;
 let serverOnline   = null;
 
 /* ── 대화 내용 localStorage 저장/복원 ── */
-function historyForAPI() {
-  return history.filter(m => m.role === 'user' || m.role === 'assistant');
+function uuidV4() {
+  if (window.crypto?.randomUUID) return window.crypto.randomUUID();
+  const bytes = new Uint8Array(16);
+  if (window.crypto?.getRandomValues) window.crypto.getRandomValues(bytes);
+  else for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+function createClientEvent(content) {
+  return { id: `msg_${uuidV4()}`, content };
+}
+
+async function persistSyncEvent(event) {
+  const res = await fetch(`${SERVER}/api/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ event, sessionId: SESSION_ID, syncOnly: true }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `서버 오류 (${res.status})`);
+  }
+}
+
+function showFileSyncError(event) {
+  const group = document.createElement('div');
+  group.className = 'msg-group bot';
+  const avatar = document.createElement('div');
+  avatar.className = 'av';
+  avatar.textContent = '👩‍💼';
+  const body = document.createElement('div');
+  body.className = 'msg-body';
+  const sender = document.createElement('div');
+  sender.className = 'msg-sender';
+  sender.textContent = '루마네';
+  const bubble = document.createElement('div');
+  bubble.className = 'bubble bot';
+  const text = document.createElement('span');
+  text.textContent = '⚠️ 첨부 메시지를 서버에 저장하지 못했습니다.';
+  const retry = document.createElement('button');
+  retry.type = 'button';
+  retry.textContent = '다시 전송';
+  retry.style.cssText = 'margin-top:8px;padding:4px 10px;font-size:12px;border:1px solid #e5e7eb;border-radius:6px;background:#fff;cursor:pointer;display:block;';
+  retry.addEventListener('click', async () => {
+    retry.disabled = true;
+    retry.textContent = '전송 중...';
+    try {
+      await persistSyncEvent(event);
+      group.remove();
+    } catch (error) {
+      text.textContent = `⚠️ 저장 실패: ${error.message}`;
+      retry.disabled = false;
+      retry.textContent = '다시 전송';
+    }
+  });
+  bubble.append(text, retry);
+  body.append(sender, bubble);
+  group.append(avatar, body);
+  document.getElementById('msgs').appendChild(group);
+  scrollBottom();
 }
 
 const HISTORY_KEY  = '루마네_히스토리';
@@ -211,7 +272,7 @@ function _getVisitorKey() {
   } catch { return ''; }
 }
 
-/* 세션 등록 + 현재 히스토리 동기화 */
+/* 세션 등록 — 대화 정본은 서버가 DB에서 복원 */
 async function registerSessionWithHistory() {
   try {
     // 세션 등록
@@ -220,14 +281,6 @@ async function registerSessionWithHistory() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ sessionId: SESSION_ID, nickname: userNickname, isTest: IS_TEST, src: SRC, src2: SRC2, visitor_key: _getVisitorKey() }),
     });
-    // 히스토리가 있으면 /api/chat으로 동기화 (빈 응답 OK)
-    if (history.length > 0) {
-      await fetch(`${SERVER}/api/chat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: historyForAPI(), sessionId: SESSION_ID, syncOnly: true }),
-      });
-    }
   } catch { /* 무시 */ }
 }
 
@@ -269,8 +322,9 @@ function startPolling() {
       for (const msg of (data.pendingMsgs || [])) {
         hideAdminTyping();
         addMsg('bot', msg.content, { fromAdmin: true });
-        // fromAdmin/time 메타 보존 — 다음 syncOnly 라운드트립에서도 어드민 식별성 유지
+        // 관리자 메시지 메타를 로컬 화면 기록에도 보존
         history.push({
+          eventId: msg.mid,
           role: 'assistant',
           content: msg.content,
           fromAdmin: true,
@@ -410,7 +464,7 @@ function buildConfirmSummary() {
 /* ================================================================
    메시지 전송
 ================================================================ */
-async function send(prefilledText) {
+async function send(prefilledText, retryEvent = null) {
   const text       = prefilledText !== undefined ? String(prefilledText) : document.getElementById('inp').value.trim();
   const hasPending = !prefilledText && !!getPendingFile();
   const editingMid = !prefilledText && getEditingMid();
@@ -447,15 +501,15 @@ async function send(prefilledText) {
       addFileMsg(url, name, isImage, mid);
       const fullUrl = url.startsWith('http') ? url : `${SERVER}${url}`;
       const content = isImage ? `[이미지]\n${fullUrl}` : `[파일: ${name}]\n${fullUrl}`;
-      history.push({ role: 'user', content, mid, ts: new Date().toISOString() });
+      const event = createClientEvent(content);
+      history.push({ role: 'user', content, eventId: event.id, mid, ts: new Date().toISOString() });
+      saveHistory();
       if (serverOnline) {
         try {
-          await fetch(`${SERVER}/api/chat`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ messages: historyForAPI(), sessionId: SESSION_ID, syncOnly: true }),
-          });
-        } catch { /* 무시 */ }
+          await persistSyncEvent(event);
+        } catch {
+          showFileSyncError(event);
+        }
       }
     });
   }
@@ -470,7 +524,8 @@ async function send(prefilledText) {
     clearInput();
     setQuick([]);
   }
-  history.push({ role: 'user', content: text, mid, replyTo: replyTo ?? undefined, ts: new Date().toISOString() });
+  const event = retryEvent || createClientEvent(text);
+  history.push({ role: 'user', content: text, eventId: event.id, mid, replyTo: replyTo ?? undefined, ts: new Date().toISOString() });
 
   /* ── 접수 확인 단계 ── */
   if (pendingConfirm) {
@@ -511,20 +566,21 @@ async function send(prefilledText) {
   setLoading(true);
 
   try {
-    let reply, completedQuote;
+    let reply, completedQuote, replyMessageId;
 
     if (serverOnline) {
       /* ── 실제 서버 AI 응답 ── */
       const res = await fetch(`${SERVER}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: historyForAPI(), sessionId: SESSION_ID, isTest: IS_TEST }),
+        body: JSON.stringify({ event, sessionId: SESSION_ID, isTest: IS_TEST }),
       });
       if (!res.ok) {
         const e = await res.json().catch(() => ({}));
         throw new Error(e.error || `서버 오류 (${res.status})`);
       }
       const data = await res.json();
+      replyMessageId = data.messageId;
 
       /* ── admin이 난입 중이면 AI 응답 없음 ── */
       if (data.adminMode) {
@@ -586,7 +642,7 @@ async function send(prefilledText) {
     // 빈 응답 (API 오류 후 중복 방지용 빈 메시지) 무시
     if (!reply) { setLoading(false); return; }
 
-    history.push({ role: 'assistant', content: reply, ts: new Date().toISOString() });
+    history.push({ role: 'assistant', content: reply, eventId: replyMessageId, ts: new Date().toISOString() });
     addMsg('bot', reply);
     if (!/케이트블랑.*견적서/.test(reply)) updateQuickFromText(reply);
     saveHistory();
@@ -607,9 +663,9 @@ async function send(prefilledText) {
 
   } catch (err) {
     // 실패한 user 메시지 텍스트를 재전송 버튼에 캡처
-    const failedText = (() => {
+    const failedEvent = (() => {
       for (let i = history.length - 1; i >= 0; i--) {
-        if (history[i].role === 'user') return history[i].content;
+        if (history[i].role === 'user') return { content: history[i].content, id: history[i].eventId };
       }
       return null;
     })();
@@ -623,7 +679,7 @@ async function send(prefilledText) {
     const errText = document.createElement('span');
     errText.textContent = `⚠️ 오류가 발생했습니다. ${err.message}`;
     bubble.appendChild(errText);
-    if (failedText) {
+    if (failedEvent?.content) {
       const retryBtn = document.createElement('button');
       retryBtn.setAttribute('data-retry', '');
       retryBtn.style.cssText = 'margin-top:8px;padding:4px 10px;font-size:12px;border:1px solid #e5e7eb;border-radius:6px;background:#fff;cursor:pointer;display:block;';
@@ -639,16 +695,16 @@ async function send(prefilledText) {
     document.getElementById('msgs').appendChild(errDiv);
     document.getElementById('msgs').scrollTop = 99999;
 
-    if (failedText) {
+    if (failedEvent?.content) {
       errDiv.querySelector('[data-retry]')?.addEventListener('click', () => {
         // history에서 실패한 user 메시지 제거 후 재전송
         let idx = -1;
         for (let i = history.length - 1; i >= 0; i--) {
-          if (history[i].role === 'user' && history[i].content === failedText) { idx = i; break; }
+          if (history[i].role === 'user' && history[i].eventId === failedEvent.id) { idx = i; break; }
         }
         if (idx !== -1) history.splice(idx, 1);
         errDiv.remove();
-        send(failedText);
+        send(failedEvent.content, { id: failedEvent.id, content: failedEvent.content });
       });
     }
   } finally {
@@ -665,13 +721,13 @@ function greet() {
     fetch(`${SERVER}/api/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messages: [], sessionId: SESSION_ID, isTest: IS_TEST }),
+      body: JSON.stringify({ sessionId: SESSION_ID, isTest: IS_TEST }),
     })
     .then(r => { if (!r.ok) throw new Error('greet failed'); return r.json(); })
     .then(data => {
       const reply = data.message;
       if (!reply) throw new Error('no message');
-      history.push({ role: 'assistant', content: reply, ts: new Date().toISOString() });
+      history.push({ role: 'assistant', content: reply, eventId: data.messageId, ts: new Date().toISOString() });
       addMsg('bot', reply);
       saveHistory();
       setLoading(false);
@@ -911,16 +967,9 @@ async function startChat() {
       }
       /* 복원 완료 후 맨 아래로 스크롤 */
       setTimeout(() => scrollBottom(), 80);
-      /* 서버 세션에도 재동기화 */
+      /* 서버가 DB 정본을 hydrate하도록 세션만 등록 */
       if (serverOnline) {
-        registerSession();
-        try {
-          await fetch(`${SERVER}/api/chat`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ messages: historyForAPI(), sessionId: SESSION_ID, syncOnly: true }),
-          });
-        } catch { /* 무시 */ }
+        await registerSession();
         startPolling();
       }
     } else {
