@@ -2,18 +2,21 @@
    Admin 설정값 & 전역 상태 & 공통 유틸
 ================================================================ */
 
-// 서버 주소
-const SERVER = 'https://lumane-server.onrender.com';
+// 배포 환경과 동일하게 same-origin 관리자 API를 사용합니다.
+const SERVER = '';
 
-// Admin API 인증 토큰 — server.js .env의 ADMIN_TOKEN 값과 일치해야 합니다
-const ADMIN_TOKEN = '423920d58ecc5da3986baaa5580e8d90933ef98544cddbd9e497066af1967e7b';
+function readCookie(name) {
+  const prefix = `${encodeURIComponent(name)}=`;
+  const value = document.cookie.split('; ').find(cookie => cookie.startsWith(prefix));
+  return value ? decodeURIComponent(value.slice(prefix.length)) : '';
+}
 
 /** Admin API 공통 헤더 */
 function adminHeaders() {
-  return {
-    'Content-Type': 'application/json',
-    'Authorization': `Bearer ${ADMIN_TOKEN}`,
-  };
+  const headers = { 'Content-Type': 'application/json' };
+  const csrfToken = readCookie('lumane_admin_csrf');
+  if (csrfToken) headers['X-CSRF-Token'] = csrfToken;
+  return headers;
 }
 
 /* ── 전역 상태 ── */

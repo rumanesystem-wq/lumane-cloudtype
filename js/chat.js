@@ -6,13 +6,23 @@ import { SERVER, DEMO } from './config.js';
 /* ── 세션 ID: localStorage에 저장하여 새로고침해도 유지 ── */
 const SESSION_KEY = '루마네_세션ID';
 function generateSessionId() {
-  const id = 'S-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7);
+  let suffix;
+  if (window.crypto?.randomUUID) {
+    suffix = window.crypto.randomUUID().replace(/-/g, '');
+  } else if (window.crypto?.getRandomValues) {
+    const bytes = new Uint8Array(16);
+    window.crypto.getRandomValues(bytes);
+    suffix = Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
+  } else {
+    suffix = Math.random().toString(36).slice(2, 7); // 구형 브라우저 호환
+  }
+  const id = `S-${Date.now()}-${suffix}`;
   localStorage.setItem(SESSION_KEY, id);
   return id;
 }
 let SESSION_ID = (() => {
   const id = localStorage.getItem(SESSION_KEY);
-  return (id && /^S-\d{13}-[a-z0-9]{5}$/.test(id)) ? id : generateSessionId();
+  return (id && /^S-\d{13}-(?:[a-f0-9]{32}|[a-z0-9]{5})$/.test(id)) ? id : generateSessionId();
 })();
 
 /* ── 테스트 모드: URL에 ?test=1 파라미터가 있으면 활성화 ── */
@@ -73,7 +83,7 @@ import { initSearch, toggleSearch, closeSearch } from './search.js';
 import { toggleHistory, showTranscript, continueFromHistory, closeTranscript, setHistoryData } from './history.js';
 import { toggleCollect, updateCollectDrawer, resetCollect } from './collect.js';
 import { showConfirm, confirmBack, confirmSubmit } from './confirm.js';
-import { autoSaveConversation, openQuote, closeQuote, printQuote } from './quote.js';
+import { openQuote, closeQuote, printQuote } from './quote.js';
 import './chat-export.js';
 
 /* ── 대화 상태 ── */
@@ -573,7 +583,7 @@ async function send(prefilledText, retryEvent = null) {
   setLoading(true);
 
   try {
-    let reply, completedQuote, replyMessageId;
+    let reply, replyMessageId;
 
     if (serverOnline) {
       /* ── 실제 서버 AI 응답 ── */
@@ -596,8 +606,7 @@ async function send(prefilledText, retryEvent = null) {
         return;
       }
 
-      reply          = data.message;
-      completedQuote = data.completedQuote;
+      reply = data.message;
 
     } else {
       /* ── 데모 응답 ── */
@@ -657,13 +666,6 @@ async function send(prefilledText, retryEvent = null) {
     // (자동 화면 전환 제거 — 견적서가 채팅창에서 혼자 사라지는 버그 수정)
     // 1.2초 후 confirmView로 자동 전환되던 코드 제거. 두 가지 버그 동시 해결:
     // ① 견적서가 혼자 사라짐 ② 그 1.2초 사이 상담사가 적어준 견적도 같이 사라짐.
-
-    // 견적서 출력 시 자동으로 어드민 DB에 저장 (접수 자동 처리)
-    // — 손님이 직접 [접수하기] 안 눌러도 견적서 떴으면 어드민 대시보드에 카드로 자동 등록.
-    // — 어드민이 카드 보고 직접 연락 / 카톡 채널로 안내 가능.
-    if (completedQuote) {
-      autoSaveConversation(history).catch(e => console.warn('견적 자동 저장 실패:', e.message));
-    }
 
     // 부모 페이지(2패널 레이아웃)에 수집된 고객 정보 전달
     postFieldsToParent();
@@ -862,7 +864,7 @@ document.addEventListener('DOMContentLoaded', () => {
   window.toggleHistory      = toggleHistory;
   window.toggleCollect      = toggleCollect;
   window.confirmBack        = confirmBack;
-  window.confirmSubmit      = () => { confirmSubmit(); autoSaveConversation(history); };
+  window.confirmSubmit      = confirmSubmit;
   window.newChat            = newChat;
   window.closeQuote         = closeQuote;
   window.printQuote         = printQuote;

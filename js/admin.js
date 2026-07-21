@@ -27,7 +27,7 @@ async function checkServer() {
 
 async function loadStats() {
   try {
-    const res  = await fetch(`${SERVER}/api/admin/stats`, { headers: adminHeaders() });
+    const res  = await adminFetch(`${SERVER}/api/admin/stats`, { headers: adminHeaders() });
     if (!res.ok) return;
     const d = await res.json();
     document.getElementById('statToday').textContent    = (d.today  ?? '—') + '건';
@@ -83,7 +83,7 @@ async function openStatDetail(period, label) {
   switchTab('stat-detail');
 
   try {
-    const res = await fetch(`${SERVER}/api/admin/stat-sessions?period=${encodeURIComponent(period)}`, { headers: adminHeaders() });
+    const res = await adminFetch(`${SERVER}/api/admin/stat-sessions?period=${encodeURIComponent(period)}`, { headers: adminHeaders() });
     if (myId !== _statRequestId) return;
     if (!res.ok) throw new Error(`서버 오류 ${res.status}`);
     const data = await res.json();
@@ -199,7 +199,7 @@ async function openMonthDetail() {
   switchTab('stat-detail');
 
   try {
-    const res = await fetch(`${SERVER}/api/admin/stat-sessions?period=month`, { headers: adminHeaders() });
+    const res = await adminFetch(`${SERVER}/api/admin/stat-sessions?period=month`, { headers: adminHeaders() });
     if (myId !== _statRequestId) return;
     if (!res.ok) throw new Error(`서버 오류 ${res.status}`);
     const data = await res.json();
@@ -327,7 +327,7 @@ function openWeekDetail(weekLabel) {
 
 async function loadQuotes() {
   try {
-    const res  = await fetch(`${SERVER}/api/quotes`, { headers: adminHeaders() });
+    const res  = await adminFetch(`${SERVER}/api/quotes`, { headers: adminHeaders() });
     if (!res.ok) throw new Error(`서버 오류 ${res.status}`);
     const data = await res.json();
     allQuotes = (data.quotes || []).slice().sort((a, b) => new Date(b.접수시간 || 0) - new Date(a.접수시간 || 0));
@@ -778,7 +778,7 @@ async function loadTokenStats() {
   const errEl = document.getElementById('tk-error');
   errEl.style.display = 'none';
   try {
-    const res = await fetch(`${SERVER}/api/admin/token-stats?period=${_tokenPeriod}`, { headers: adminHeaders() });
+    const res = await adminFetch(`${SERVER}/api/admin/token-stats?period=${_tokenPeriod}`, { headers: adminHeaders() });
     const d = await res.json();
     if (!res.ok) {
       errEl.textContent = `오류: ${d.error || res.status}`;
@@ -861,7 +861,7 @@ async function loadHistory() {
   errEl.style.display = 'none';
   listEl.innerHTML = '<div style="text-align:center;color:#9ca3af;padding:32px;font-size:13px;">불러오는 중…</div>';
   try {
-    const res = await fetch(`${SERVER}/api/admin/conversations`, { headers: adminHeaders() });
+    const res = await adminFetch(`${SERVER}/api/admin/conversations`, { headers: adminHeaders() });
     if (!res.ok) {
       let detail = '';
       try { const d = await res.json(); detail = d.error || ''; } catch(_) {}
@@ -960,7 +960,7 @@ async function openHistoryDetail(id) {
   // 어드민 메모 로드 (백그라운드)
   if (typeof window.hdLoadMemos === 'function') window.hdLoadMemos(id);
   try {
-    const res = await fetch(`${SERVER}/api/admin/conversations/${encodeURIComponent(id)}`, { headers: adminHeaders() });
+    const res = await adminFetch(`${SERVER}/api/admin/conversations/${encodeURIComponent(id)}`, { headers: adminHeaders() });
     if (!res.ok) throw new Error();
     const { conversation: c } = await res.json();
     if (c.session_id) {
@@ -1007,7 +1007,7 @@ async function sendHdReply() {
   btn.disabled = true;
   btn.textContent = '전송 중…';
   try {
-    const takeoverRes = await fetch(`${SERVER}/api/admin/takeover`, {
+    const takeoverRes = await adminFetch(`${SERVER}/api/admin/takeover`, {
       method: 'POST', headers: adminHeaders(),
       body: JSON.stringify({ sessionId: _currentHdSessionId }),
     });
@@ -1016,7 +1016,7 @@ async function sendHdReply() {
       try { errMsg = (await takeoverRes.json()).error || errMsg; } catch {}
       throw new Error(errMsg);
     }
-    const res = await fetch(`${SERVER}/api/admin/message`, {
+    const res = await adminFetch(`${SERVER}/api/admin/message`, {
       method: 'POST', headers: adminHeaders(),
       body: JSON.stringify({ sessionId: _currentHdSessionId, message: msg }),
     });
@@ -1048,7 +1048,7 @@ function closeHistoryDetail(e) {
 async function deleteConversationById(id) {
   if (!confirm('이 상담 기록을 삭제하시겠습니까? 복구할 수 없습니다.')) return;
   try {
-    const res = await fetch(`${SERVER}/api/admin/conversations/${encodeURIComponent(id)}`, {
+    const res = await adminFetch(`${SERVER}/api/admin/conversations/${encodeURIComponent(id)}`, {
       method: 'DELETE', headers: adminHeaders(),
     });
     if (!res.ok) { const d = await res.json(); throw new Error(d.error || res.status); }
@@ -1066,7 +1066,7 @@ async function deleteConversation() {
   btn.textContent = '삭제 중…';
   btn.disabled = true;
   try {
-    const res = await fetch(`${SERVER}/api/admin/conversations/${encodeURIComponent(_currentHistoryId)}`, {
+    const res = await adminFetch(`${SERVER}/api/admin/conversations/${encodeURIComponent(_currentHistoryId)}`, {
       method: 'DELETE', headers: adminHeaders(),
     });
     if (!res.ok) { const d = await res.json(); throw new Error(d.error || res.status); }
@@ -1086,7 +1086,7 @@ async function registerQuoteFromConversation() {
   btn.textContent = '등록 중…';
   btn.disabled = true;
   try {
-    const res = await fetch(`${SERVER}/api/admin/conversations/${encodeURIComponent(_currentHistoryId)}/register-quote`, {
+    const res = await adminFetch(`${SERVER}/api/admin/conversations/${encodeURIComponent(_currentHistoryId)}/register-quote`, {
       method: 'POST', headers: adminHeaders(),
     });
     if (!res.ok) { const d = await res.json(); throw new Error(d.error || res.status); }
@@ -1138,12 +1138,6 @@ function hideTkTooltip() {
    앱 초기화
 ================================================================ */
 
-checkServer().then(() => startBgPolling());
-setInterval(checkServer, 30000);
-initAdminFileUpload();
-initAdminPaste();
-initAdminCtxMenuListener();
-initAdminSearch();
 window.toggleAdminSearch    = toggleAdminSearch;
 window.clearAdminReplyBar   = clearAdminReplyBar;
 
@@ -1174,14 +1168,17 @@ window.applyTemplate        = applyTemplate;
 window.sendHdReply          = sendHdReply;
 
 /* 배포 자동감지 — 새 버전 배포 시 자동 새로고침 */
-(async function startUpdateChecker() {
+async function startUpdateChecker() {
+  if (!isAdminAuthActive()) return;
   let currentVersion = null;
   try {
     const r = await fetch(`${SERVER}/api/version`);
     if (r.ok) currentVersion = (await r.json()).v;
   } catch { /* 무시 */ }
 
-  setInterval(async () => {
+  if (!isAdminAuthActive()) return;
+
+  adminUpdateTimer = setInterval(async () => {
     if (!serverOnline) return;
     try {
       const r = await fetch(`${SERVER}/api/version?t=${Date.now()}`);
@@ -1192,19 +1189,39 @@ window.sendHdReply          = sendHdReply;
       }
     } catch { /* 무시 */ }
   }, 30000);
-})();
+}
 
 /* ================================================================
    브라우저 알림 (상담원용)
 ================================================================ */
-(function initAdminNotifications() {
+function initAdminNotifications() {
   if (!('Notification' in window)) return;
 
   // 권한 요청 (아직 결정 안 됐을 때만)
   if (Notification.permission === 'default') {
     Notification.requestPermission();
   }
-})();
+}
+
+async function initializeAdminApp() {
+  const authenticated = await verifyAdminSession();
+  if (!authenticated) return;
+
+  await checkServer();
+  if (!isAdminAuthActive()) return;
+  startBgPolling();
+  prewarmSourceStats();
+  adminHealthTimer = setInterval(checkServer, 30000);
+  adminSessionTimer = setInterval(verifyAdminSession, 60 * 1000);
+  initAdminFileUpload();
+  initAdminPaste();
+  initAdminCtxMenuListener();
+  initAdminSearch();
+  startUpdateChecker();
+  initAdminNotifications();
+}
+
+initializeAdminApp();
 
 let _notifiedSessions = new Set();
 let _notifiedMsgCounts = {};

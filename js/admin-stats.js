@@ -28,7 +28,7 @@ async function loadVisitorStats(range = 7) {
   if (rangeLabelEl) rangeLabelEl.textContent = `${range}일`;
 
   try {
-    const res = await fetch(`${SERVER}/api/admin/stats/visitors?range=${range}`, {
+    const res = await adminFetch(`${SERVER}/api/admin/stats/visitors?range=${range}`, {
       headers: typeof adminHeaders === 'function' ? adminHeaders() : {},
     });
     if (!res.ok) throw new Error('통계 조회 실패');

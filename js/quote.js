@@ -125,22 +125,3 @@ export function printQuote() {
     URL.revokeObjectURL(blobUrl);
   });
 }
-
-/* ── 상담 자동 저장 (접수 확정 시 자동 호출, 버튼 없음) ── */
-export async function autoSaveConversation(history) {
-  if (!history || history.length === 0) return;
-  try {
-    const res = await fetch(`${SERVER}/api/summarize`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messages: history.filter(m => m.role === 'user' || m.role === 'assistant') }),
-    });
-    if (!res.ok) throw new Error(`서버 오류 (${res.status})`);
-    const data = await res.json();
-    if (!data.success) throw new Error(data.error || '저장 실패');
-
-    return data.summary;
-  } catch (err) {
-    console.error('⚠️ 상담 자동 저장 실패 (재시도 없음):', err.message);
-  }
-}
