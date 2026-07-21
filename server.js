@@ -8,10 +8,10 @@ require('dotenv').config(); // .env 파일 로드
 
 const express   = require('express');
 const cors      = require('cors');
-const { rateLimit, ipKeyGenerator } = require('express-rate-limit');
+const { rateLimit } = require('express-rate-limit');
 const Anthropic = require('@anthropic-ai/sdk');
-const { createClient } = require('@supabase/supabase-js');
 const { Client: NotionClient } = require('@notionhq/client');
+const { createClient } = require('@supabase/supabase-js');
 const multer = require('multer');
 const { executeSupabase } = require('./lib/supabase-reliability');
 const {
@@ -31,11 +31,22 @@ const {
   recoverRuntimeState,
 } = require('./lib/session-recovery');
 const { insertIdempotentQuote } = require('./lib/quote-storage');
+const { createAdminAuth, createAdminPageHandler } = require('./lib/admin-auth');
+const {
+  assertSafeExternalUrl,
+  rateLimitKey,
+  readTextLimited,
+  uploadTypeFor,
+  validateUpload,
+} = require('./lib/security-boundaries');
 const AdmZip = require('adm-zip');
 const fs   = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const dns = require('dns').promises;
+
+const notion = new NotionClient({ auth: process.env.NOTION_TOKEN });
+const NOTION_DB_ID = process.env.NOTION_DB_ID || '221b622e-5115-4d07-b1fa-ed7fa52c6895';
 
 // ── Supabase 클라이언트 ───────────────────────────────────────
 const supabase = createClient(
@@ -50,10 +61,6 @@ const supabaseCustomer = createClient(
   process.env.SUPABASE_SECRET_KEY,
   { db: { schema: 'customer' } }
 );
-
-// ── Notion 클라이언트 ─────────────────────────────────────────
-const notion = new NotionClient({ auth: process.env.NOTION_TOKEN });
-const NOTION_DB_ID = '221b622e-5115-4d07-b1fa-ed7fa52c6895'; // 상담 기록 DB
 
 const app  = express();
 const PORT = process.env.PORT || 3001;
@@ -94,7 +101,12 @@ app.use(cors({
     'http://127.0.0.1:3001',
   ],
 }));
-app.use(express.json({ limit: '10mb' })); // 견적 폼 사진(base64) 수용
+const defaultJsonParser = express.json({ limit: '100kb' });
+const quoteJsonParser = express.json({ limit: '10mb' }); // 견적 폼 사진(base64) 수용
+app.use((req, res, next) => {
+  const parser = req.path === '/api/quote' ? quoteJsonParser : defaultJsonParser;
+  parser(req, res, next);
+});
 
 // ── Slack 알림 헬퍼 (fire-and-forget, 이벤트 라벨링) ──────────
 // 포맷: <이모지> *<이벤트명>* [<서비스>]\n<본문>
@@ -129,7 +141,7 @@ function notifyRateLimitOnce(ip) {
 const chatRateLimit = rateLimit({
   windowMs: 60 * 1000,   // 1분
   max: 10,               // 최대 10회
-  keyGenerator: ipKeyGenerator,
+  keyGenerator: rateLimitKey,
   handler: (req, res) => {
     console.warn(`🚫 Rate limit 초과: ${req.ip}`);
     notifyRateLimitOnce(req.ip);
@@ -141,34 +153,77 @@ const chatRateLimit = rateLimit({
   legacyHeaders: false,
 });
 
-// ── Admin API 인증 미들웨어 ───────────────────────────────────
-const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
-
-function requireAdmin(req, res, next) {
-  if (!ADMIN_TOKEN) {
-    return res.status(403).json({ error: 'Admin 기능이 비활성화되어 있습니다.' });
-  }
-  const auth = req.headers['authorization'] || '';
-  // 타이밍 공격 방지 — 길이 다르면 즉시 reject, 같으면 timingSafeEqual
-  const expected = `Bearer ${ADMIN_TOKEN}`;
-  if (auth.length !== expected.length) {
-    return res.status(401).json({ error: '인증이 필요합니다.' });
-  }
-  const a = Buffer.from(auth);
-  const b = Buffer.from(expected);
-  if (!crypto.timingSafeEqual(a, b)) {
-    return res.status(401).json({ error: '인증이 필요합니다.' });
-  }
-  next();
+function createRateLimit({ windowMs, max, message, skipSuccessfulRequests = false }) {
+  return rateLimit({
+    windowMs,
+    max,
+    keyGenerator: rateLimitKey,
+    skipSuccessfulRequests,
+    handler: (req, res) => {
+      console.warn(`🚫 Rate limit 초과: ${req.ip} ${req.method} ${req.path}`);
+      notifyRateLimitOnce(req.ip);
+      res.status(429).json({ error: message });
+    },
+    standardHeaders: true,
+    legacyHeaders: false,
+  });
 }
 
-// 모든 /api/admin/* 라우트에 인증 적용
+const sessionRegisterRateLimit = createRateLimit({
+  windowMs: 60 * 1000,
+  max: 20,
+  message: '세션 생성 요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.',
+});
+const uploadRateLimit = createRateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 10,
+  message: '파일 업로드 요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.',
+});
+const remoteFetchRateLimit = createRateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  message: '외부 미리보기 요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.',
+});
+const adminLoginRateLimit = createRateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  message: '관리자 인증 실패가 너무 많습니다. 잠시 후 다시 시도해 주세요.',
+  skipSuccessfulRequests: true,
+});
+
+// ── Admin API 인증 미들웨어 ───────────────────────────────────
+const adminAuth = createAdminAuth({
+  signInWithPassword: credentials => {
+    // 요청별 client로 provider token이 다른 로그인 요청과 공유되지 않게 한다.
+    const authClient = createClient(
+      process.env.SUPABASE_URL,
+      process.env.SUPABASE_SECRET_KEY,
+      {
+        auth: {
+          persistSession: false,
+          autoRefreshToken: false,
+          detectSessionInUrl: false,
+        },
+      }
+    );
+    return authClient.auth.signInWithPassword(credentials);
+  },
+});
+const { requireAdmin } = adminAuth;
+
+app.post('/api/admin-auth/login', adminLoginRateLimit, adminAuth.login);
+app.get('/api/admin-auth/session', adminAuth.currentSession);
+app.post('/api/admin-auth/logout', requireAdmin, adminAuth.logout);
+
+// 모든 관리자 및 견적 조회/변경 라우트에 공통 인증 적용
 app.use('/api/admin', requireAdmin);
+app.use('/api/quotes', requireAdmin);
 
 // ── 라이브 세션 관리 (메모리) ─────────────────────────────────
 // 서버 재시작 시 초기화됨. 필요 시 Supabase로 이전 가능.
-const SESSION_ID_RE = /^S-\d{13}-[a-z0-9]{5}$/;
+const SESSION_ID_RE = /^S-\d{13}-(?:[a-f0-9]{32}|[a-z0-9]{5})$/;
 const TEMP_NAME_RE = /^\d{2}\/\d{2}\s\d{2}:\d{2}$/;
+const MAX_ACTIVE_SESSIONS = 1000;
 const sessions = new Map();
 const sessionSerializer = new SessionSerializer();
 const sessionHydrations = new Map();
@@ -259,6 +314,11 @@ function isSessionBlocked(sessionId) {
 
 function getOrCreateSession(sessionId) {
   if (!sessions.has(sessionId)) {
+    if (sessions.size >= MAX_ACTIVE_SESSIONS) {
+      const error = new Error('활성 세션 한도에 도달했습니다.');
+      error.code = 'SESSION_CAPACITY';
+      throw error;
+    }
     sessions.set(sessionId, {
       id: sessionId,
       mode: 'ai',
@@ -473,7 +533,7 @@ async function autoRegisterQuote(sess, reply) {
     supabase.from('quotes').upsert(payload, { onConflict: 'quote_number' })
   );
   sess.lastQuoteReply = reply;
-  console.log(`✅ AI 견적 자동 등록: ${quoteNumber} (${payload.name})`);
+  console.log(`✅ AI 견적 자동 등록: ${quoteNumber}`);
 
   // Slack 알림 — 세션당 1회 (같은 quoteNumber upsert 중복 발사 방지)
   if (!sess.quoteNotified) {
@@ -514,9 +574,9 @@ async function autoRegisterQuote(sess, reply) {
           source_ref:       quoteNumber,
         }], { onConflict: 'source_ref' }));
         sess.customerInstallSaved = true;
-        console.log(`✅ customer 스키마 저장 (AI상담): ${name} (${phone})`);
+        console.log(`✅ customer 스키마 저장 (AI상담): ${quoteNumber}`);
       } else {
-        console.log(`customer.install 이미 저장됨, 건너뜀 (AI상담): ${name}`);
+        console.log(`customer.install 이미 저장됨, 건너뜀 (AI상담): ${quoteNumber}`);
       }
     } catch (custErr) {
       console.error('customer 스키마 저장 오류 (quotes는 저장됨):', custErr.message);
@@ -729,8 +789,10 @@ const _serveHtml = (file) => (req, res) => {
 };
 app.get('/',           _serveHtml('index.html'));
 app.get('/index.html', _serveHtml('index.html'));
-app.get('/admin',      _serveHtml('admin.html'));
-app.get('/admin.html', _serveHtml('admin.html'));
+const _serveAdminPage = createAdminPageHandler({ adminAuth, rootDir: __dirname });
+app.get('/admin',      _serveAdminPage);
+app.get('/admin.html', _serveAdminPage);
+app.get('/admin-login.html', _serveHtml('admin-login.html'));
 app.get('/chat',       _serveHtml('chat.html'));
 app.get('/chat.html',  _serveHtml('chat.html'));
 app.get('/quote',      _serveHtml('quote.html'));
@@ -826,16 +888,26 @@ const uploadMw = multer({
   storage: multer.memoryStorage(),
   limits:  { fileSize: 10 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
-    const ok = /\.(jpe?g|png|gif|webp|pdf|mp4|webm|ogg|mov|mp3|wav|m4a|aac)$/i
-      .test(path.extname(file.originalname));
-    cb(ok ? null : new Error('지원하지 않는 형식'), ok);
+    try {
+      uploadTypeFor(file);
+      cb(null, true);
+    } catch (error) {
+      cb(error, false);
+    }
   },
 });
 
-app.post('/api/upload', uploadMw.single('file'), async (req, res) => {
+app.post('/api/upload', uploadRateLimit, uploadMw.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: '파일이 없습니다' });
 
-  const ext      = path.extname(req.file.originalname).toLowerCase();
+  let uploadType;
+  try {
+    uploadType = validateUpload(req.file);
+  } catch (error) {
+    console.warn(`[UPLOAD_REJECTED] reason=${error.message}`);
+    return res.status(400).json({ error: '파일 형식과 실제 내용이 일치하지 않습니다.' });
+  }
+  const ext      = uploadType.extension;
   const filename = Date.now() + '-' + Math.random().toString(36).slice(2, 7) + ext;
   const isImage  = /\.(jpe?g|png|gif|webp)$/i.test(ext);
 
@@ -843,7 +915,7 @@ app.post('/api/upload', uploadMw.single('file'), async (req, res) => {
     const { error } = await supabase.storage
       .from(STORAGE_BUCKET)
       .upload(filename, req.file.buffer, {
-        contentType: req.file.mimetype,
+        contentType: uploadType.contentType,
         upsert: false,
       });
     if (error) throw error;
@@ -860,44 +932,14 @@ app.post('/api/upload', uploadMw.single('file'), async (req, res) => {
 });
 
 // ── OG 링크 미리보기 API ─────────────────────────────────────
-// SSRF 방어: 호스트네임을 실제 IP로 해석 후 사설/loopback 대역 차단
-function _isPrivateIp(ip) {
-  if (!ip) return true;
-  // IPv4 사설/loopback/링크로컬
-  if (/^127\./.test(ip)) return true;
-  if (/^10\./.test(ip)) return true;
-  if (/^192\.168\./.test(ip)) return true;
-  if (/^172\.(1[6-9]|2\d|3[01])\./.test(ip)) return true;
-  if (/^169\.254\./.test(ip)) return true;
-  if (/^0\./.test(ip)) return true;
-  // IPv6 loopback / 링크로컬 / unique-local
-  if (ip === '::1' || ip === '::') return true;
-  if (/^fe80:/i.test(ip)) return true;
-  if (/^fc[0-9a-f]{2}:/i.test(ip) || /^fd[0-9a-f]{2}:/i.test(ip)) return true;
-  return false;
-}
-async function _safeUrlOrThrow(url) {
-  const u = new URL(url);
-  const lookups = await dns.lookup(u.hostname, { all: true });
-  for (const { address } of lookups) {
-    if (_isPrivateIp(address)) throw new Error('내부 IP 차단');
-  }
-  return u;
-}
-
-app.get('/api/og', async (req, res) => {
+app.get('/api/og', remoteFetchRateLimit, async (req, res) => {
   const { url } = req.query;
   if (!url || !/^https?:\/\//i.test(url)) {
     return res.status(400).json({ error: 'url 파라미터가 필요합니다' });
   }
-  // 정규식 1차 차단 (8진수·hex 등 우회 방지를 위해 dns 검증도 함께)
-  const BLOCKED_IP = /^https?:\/\/(localhost|127\.|0\.0\.0\.|10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|::1|169\.254\.)/i;
-  if (BLOCKED_IP.test(url)) {
-    return res.status(400).json({ error: '허용되지 않는 URL입니다' });
-  }
-  // dns 기반 IP 검증 (8진수·10진수·DNS 리바인딩 방어)
+  let safeUrl;
   try {
-    await _safeUrlOrThrow(url);
+    safeUrl = await assertSafeExternalUrl(url, dns.lookup);
   } catch {
     return res.status(400).json({ error: '허용되지 않는 URL입니다' });
   }
@@ -924,7 +966,7 @@ app.get('/api/og', async (req, res) => {
   }
 
   try {
-    const resp = await fetch(url, {
+    const resp = await fetch(safeUrl, {
       headers: { 'User-Agent': 'Mozilla/5.0 (compatible; LumaneBot/1.0)' },
       signal:  AbortSignal.timeout(5000),
       redirect: 'manual', // SSRF 방어: 자동 리다이렉트로 내부 IP 우회 차단
@@ -932,7 +974,11 @@ app.get('/api/og', async (req, res) => {
     if (resp.status >= 300 && resp.status < 400) {
       return res.status(400).json({ error: '리다이렉트 차단됨' });
     }
-    const html = await resp.text();
+    const contentType = resp.headers.get('content-type') || '';
+    if (!contentType.toLowerCase().includes('text/html')) {
+      return res.status(400).json({ error: 'HTML 문서만 미리보기할 수 있습니다' });
+    }
+    const html = await readTextLimited(resp, 512 * 1024);
 
     // HTML 엔티티 디코딩 (&amp; → & 등)
     const decodeHtml = s => s
@@ -1470,7 +1516,7 @@ app.post('/api/chat', chatRateLimit, withSerializedSession(async (req, res) => {
 }));
 
 // ── 세션 등록 API ─────────────────────────────────────────────
-app.post('/api/session/register', withSerializedSession(async (req, res) => {
+app.post('/api/session/register', sessionRegisterRateLimit, withSerializedSession(async (req, res) => {
   const { sessionId, nickname, isTest, src, src2, visitor_key } = req.body;
 
   /* [SRC 진단 로그] 새 라벨 출처 추적용 — 임시 진단 코드 (출처 파악 후 제거 예정)
@@ -2852,7 +2898,7 @@ app.post('/api/quote', chatRateLimit, async (req, res) => {
     }
     payload.quote_number = data?.quote_number || payload.quote_number;
 
-    console.log(`✅ 견적 폼 접수: ${payload.quote_number} (${payload.name})`);
+    console.log(`✅ 견적 폼 접수: ${payload.quote_number}`);
 
     // 응답 photo_skipped 플래그는 아래 res.json에서 같이 보냄
 
@@ -2895,7 +2941,7 @@ app.post('/api/quote', chatRateLimit, async (req, res) => {
           last_changed_at:  now,
           source_ref:       payload.quote_number,
         }], { onConflict: 'source_ref' }));
-        console.log(`✅ customer 스키마 저장 (폼제출): ${payload.name} (${payload.phone})`);
+        console.log(`✅ customer 스키마 저장 (폼제출): ${payload.quote_number}`);
       } catch (custErr) {
         console.error('customer 스키마 저장 오류 (quotes는 저장됨):', custErr.message);
         throw custErr;
@@ -3002,7 +3048,7 @@ app.patch('/api/quotes/:id', requireAdmin, async (req, res) => {
 // ── 상담 요약 저장 API ─────────────────────────────────────────
 // chat.html에서 "상담 저장" 버튼 클릭 시 호출
 // Claude가 대화 내용을 분석해서 기획서 항목대로 자동 추출 후 Supabase 저장
-app.post('/api/summarize', async (req, res) => {
+app.post('/api/summarize', requireAdmin, async (req, res) => {
   const { messages } = req.body;
 
   if (!messages || !Array.isArray(messages) || messages.length === 0) {
@@ -3065,7 +3111,7 @@ app.post('/api/summarize', async (req, res) => {
 
     if (error) throw error;
 
-    console.log(`✅ 상담 저장됨: ID ${data.id} / 고객: ${summary.이름 || '미확인'}`);
+    console.log(`✅ 상담 저장됨: ID ${data.id}`);
 
     // ── Notion 저장 ───────────────────────────────────────────
     if (process.env.NOTION_TOKEN) {
@@ -3103,7 +3149,7 @@ app.post('/api/summarize', async (req, res) => {
             '상담상태':     { select: { name: '견적완료' } },
           },
         });
-        console.log(`📋 Notion 저장됨: ${summary.이름 || '미확인'}`);
+        console.log(`📋 Notion 저장됨: conversation=${data.id}`);
       } catch (notionErr) {
         // Notion 저장 실패해도 상담 저장은 성공으로 처리
         console.error('⚠️ Notion 저장 실패 (Supabase는 정상):', notionErr.message);
@@ -3116,6 +3162,23 @@ app.post('/api/summarize', async (req, res) => {
     console.error('❌ 상담 요약 오류:', err.message);
     res.status(500).json({ error: '저장 중 오류가 발생했습니다.' });
   }
+});
+
+// ── API 오류 응답 정규화 ─────────────────────────────────────
+app.use((error, req, res, next) => {
+  if (res.headersSent) return next(error);
+  if (error instanceof multer.MulterError) {
+    const status = error.code === 'LIMIT_FILE_SIZE' ? 413 : 400;
+    return res.status(status).json({ error: '업로드 요청이 허용 범위를 벗어났습니다.' });
+  }
+  if (error?.type === 'entity.too.large') {
+    return res.status(413).json({ error: '요청 본문이 너무 큽니다.' });
+  }
+  if (req.path === '/api/upload') {
+    return res.status(400).json({ error: '지원하지 않는 파일 형식입니다.' });
+  }
+  console.error(`[UNHANDLED_API_ERROR] method=${req.method} path=${req.path} name=${error?.name || 'Error'}`);
+  res.status(500).json({ error: '요청을 처리하지 못했습니다.' });
 });
 
 // ── customer 스키마 probe (재방문 감지에 필요한 컬럼 존재 여부) ──

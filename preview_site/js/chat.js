@@ -7,8 +7,18 @@ import { SERVER, DEMO } from './config.js';
 const SESSION_ID = (() => {
   const KEY = '루마네_세션ID';
   let id = localStorage.getItem(KEY);
-  if (!id || !/^S-\d{13}-[a-z0-9]{5}$/.test(id)) {
-    id = 'S-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7);
+  if (!id || !/^S-\d{13}-(?:[a-f0-9]{32}|[a-z0-9]{5})$/.test(id)) {
+    let suffix;
+    if (window.crypto?.randomUUID) {
+      suffix = window.crypto.randomUUID().replace(/-/g, '');
+    } else if (window.crypto?.getRandomValues) {
+      const bytes = new Uint8Array(16);
+      window.crypto.getRandomValues(bytes);
+      suffix = Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
+    } else {
+      suffix = Math.random().toString(36).slice(2, 7);
+    }
+    id = `S-${Date.now()}-${suffix}`;
     localStorage.setItem(KEY, id);
   }
   return id;
@@ -35,7 +45,7 @@ import { initSearch, toggleSearch, closeSearch } from './search.js';
 import { toggleHistory, showTranscript, continueFromHistory, closeTranscript, setHistoryData } from './history.js';
 import { toggleCollect, updateCollectDrawer, resetCollect } from './collect.js';
 import { showConfirm, confirmBack, confirmSubmit } from './confirm.js';
-import { autoSaveConversation, openQuote, closeQuote, printQuote } from './quote.js';
+import { openQuote, closeQuote, printQuote } from './quote.js';
 
 /* ── 대화 상태 ── */
 let history        = [];
@@ -563,7 +573,7 @@ document.addEventListener('DOMContentLoaded', () => {
   window.toggleHistory      = toggleHistory;
   window.toggleCollect      = toggleCollect;
   window.confirmBack        = confirmBack;
-  window.confirmSubmit      = () => { confirmSubmit(); autoSaveConversation(history); };
+  window.confirmSubmit      = confirmSubmit;
   window.newChat            = newChat;
   window.closeQuote         = closeQuote;
   window.printQuote         = printQuote;
