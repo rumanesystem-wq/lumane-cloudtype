@@ -18,7 +18,7 @@ colors:
 
   on-surface: "#2C2820"
   on-surface-secondary: "#6B6056"
-  on-surface-muted: "#9C9288"
+  on-surface-muted: "#756B62"
 
   outline: "#E4DDD2"
   outline-strong: "#6B6056"
@@ -29,6 +29,8 @@ colors:
   warning-container: "#FEF3C7"
   danger: "#B91C1C"
   danger-container: "#FEE2E2"
+  scrim: "rgba(44, 40, 32, 0.55)"
+  transparent: "transparent"
 
 typography:
   display:
@@ -82,9 +84,64 @@ rounded:
 spacing:
   xs: 4px
   sm: 8px
+  control: 12px
   md: 16px
+  content: 20px
   lg: 24px
   xl: 32px
+  2xl: 48px
+  3xl: 56px
+  4xl: 64px
+  5xl: 96px
+
+x-breakpoints:
+  compact: 360px
+  mobile: 390px
+  tablet: 768px
+  desktop: 1024px
+  wide: 1440px
+
+x-borders:
+  default-width: 1px
+  default: 1px solid "{colors.outline}"
+  strong: 1px solid "{colors.outline-strong}"
+  accent-width: 3px
+
+x-shadows:
+  floating: 0 12px 36px rgba(44, 40, 32, 0.16)
+
+x-motion:
+  fast: 120ms
+  normal: 180ms
+  reduced: 0.01ms
+  easing: ease-out
+
+x-accessibility:
+  target-min: 44px
+  focus-width: 3px
+  focus-offset: 2px
+
+x-layout:
+  viewport-width: 100vw
+  viewport-height: 100vh
+  dynamic-viewport-height: 100dvh
+  content-max: 1280px
+  navigation-height: 64px
+  badge-height: 28px
+  feedback-min: 150px
+  dialog-max: 520px
+  toast-max: 360px
+  tooltip-max: 240px
+  split-columns: "minmax(260px, 0.78fr) minmax(0, 1.5fr)"
+  two-columns: "repeat(2, minmax(0, 1fr))"
+  one-column: "1fr"
+  page-inline-fluid: 3vw
+  page-block-fluid: 4vw
+
+x-type-details:
+  brand-size: 18px
+  page-title-max: 36px
+  eyebrow-tracking: 0.08em
 
 components:
   button-primary:
@@ -133,6 +190,43 @@ components:
     typography: "{typography.body}"
     rounded: "{rounded.md}"
     padding: 12px
+
+  page:
+    backgroundColor: "{colors.surface-warm}"
+    textColor: "{colors.on-surface}"
+
+  panel-subtle:
+    backgroundColor: "{colors.surface-subtle}"
+    textColor: "{colors.on-surface-secondary}"
+
+  metadata:
+    backgroundColor: "{colors.surface-warm}"
+    textColor: "{colors.on-surface-muted}"
+
+  divider-strong:
+    backgroundColor: "{colors.surface}"
+    textColor: "{colors.outline-strong}"
+
+  focus-ring:
+    backgroundColor: "{colors.primary-strong}"
+
+  dialog-scrim:
+    backgroundColor: "{colors.scrim}"
+
+  transparent-control:
+    backgroundColor: "{colors.transparent}"
+
+  feedback-success:
+    backgroundColor: "{colors.success-container}"
+    textColor: "{colors.success}"
+
+  feedback-warning:
+    backgroundColor: "{colors.warning-container}"
+    textColor: "{colors.warning}"
+
+  feedback-danger:
+    backgroundColor: "{colors.danger-container}"
+    textColor: "{colors.danger}"
 ---
 
 ## Overview
@@ -183,6 +277,7 @@ components:
 ### 간격
 
 - 모든 신규 레이아웃은 4px 기반 spacing token을 사용한다.
+- 1~3px 값은 border와 focus offset처럼 의미가 다른 토큰에만 두고 spacing에는 넣지 않는다.
 - 화면 외곽은 모바일 16px, 태블릿 이상 24~32px를 기본으로 한다.
 - 카드 내부는 기본 24px이며 작은 모바일 카드만 16px까지 줄일 수 있다.
 
@@ -195,6 +290,9 @@ components:
 
 Breakpoint 숫자는 구현 목표가 아니라 검증 기준이다. 콘텐츠가 깨지는 지점을 기준으로
 CSS를 작성하고 위 viewport에서 결과를 검증한다.
+
+구현의 반응형 숫자는 `x-breakpoints`를 정본으로 사용하며 토큰 생성기의 drift 검사로
+CSS의 미디어 쿼리와 일치 여부를 확인한다.
 
 ## Elevation & Depth
 
@@ -225,6 +323,7 @@ CSS를 작성하고 위 viewport에서 결과를 검증한다.
 - 오류 요약은 첫 오류로 이동할 수 있어야 한다.
 - placeholder를 label 대신 사용하지 않는다.
 - focus ring을 제거하지 않는다.
+- 최소 터치 영역과 focus ring 치수는 `x-accessibility`를 사용한다.
 
 ### Dialogs
 
@@ -251,6 +350,7 @@ CSS를 작성하고 위 viewport에서 결과를 검증한다.
 - 브랜드 골드는 선택과 주요 행동에 집중해서 사용한다.
 - 정보 위계는 색보다 여백, 크기, 굵기로 먼저 만든다.
 - 텍스트는 HTML 문자열이 아니라 안전한 텍스트 노드로 렌더링한다.
+- 네트워크 호출은 승인된 단일 API client 경계에서만 수행하고 화면 컴포넌트에서는 직접 호출하지 않는다.
 - 모바일과 키보드 사용자를 동일한 완료 조건으로 테스트한다.
 - 공통 token과 primitive를 사용해 화면 간 상태 표현을 통일한다.
 
@@ -260,6 +360,7 @@ CSS를 작성하고 위 viewport에서 결과를 검증한다.
 - 골드 배경에 흰색 일반 텍스트를 사용하지 않는다.
 - 10~11px 텍스트로 중요한 정보나 행동을 표시하지 않는다.
 - 인라인 style, 인라인 event handler, 신규 전역 함수를 추가하지 않는다.
+- 전역 객체 읽기는 인증 redirect 같은 플랫폼 연동에 한해 허용하되 전역 속성 쓰기나 API 노출은 하지 않는다.
 - 고정 픽셀 높이 계산으로 검색바, 답장바, 첨부바를 겹쳐 쌓지 않는다.
 - 모바일에서 기능을 `display: none`으로 제거하지 않는다.
 
@@ -272,3 +373,5 @@ CSS를 작성하고 위 viewport에서 결과를 검증한다.
 - `chat.html`
 - `quote.html`
 - `plans/01-platform-modernization.md`
+- `frontend/admin/src/styles/tokens.css`
+- `frontend/admin/src/styles/admin.css`
