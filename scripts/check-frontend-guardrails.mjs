@@ -51,7 +51,6 @@ function analyzeScriptAst(file, source, allowNetworkClient) {
   const globalAliases = new Set(['window', 'globalThis', 'self']);
   const networkAliases = new Set(['fetch', 'axios', 'ky']);
   const styleObjectAliases = new Set();
-  const shadowedNetworkNames = new Set();
   const domParserAliases = new Set();
   const failures = [];
 
@@ -64,39 +63,61 @@ function analyzeScriptAst(file, source, allowNetworkClient) {
     }
     return undefined;
   };
-  const networkExpression = (node) => {
-    if (node?.type === 'Identifier') return (!shadowedNetworkNames.has(node.name) && networkAliases.has(node.name)) || networkConstructors.has(node.name);
+  const scopeBindsName = (scope, name) => {
+    if (scope.type === 'Program' || scope.type === 'BlockStatement') {
+      return scope.body.some((statement) => {
+        if (statement.type === 'FunctionDeclaration' || statement.type === 'ClassDeclaration') return statement.id?.name === name;
+        if (statement.type !== 'VariableDeclaration') return false;
+        return statement.declarations.some((declaration) => declaration.id.type === 'Identifier' && declaration.id.name === name);
+      });
+    }
+    if (scope.type === 'FunctionDeclaration' || scope.type === 'FunctionExpression' || scope.type === 'ArrowFunctionExpression') {
+      return scope.id?.name === name || scope.params.some((parameter) => parameter.type === 'Identifier' && parameter.name === name)
+        || scope.body.type === 'BlockStatement' && scopeBindsName(scope.body, name);
+    }
+    return false;
+  };
+  const isShadowed = (name, ancestors) => {
+    for (let index = ancestors.length - 1; index >= 0; index -= 1) {
+      const scope = ancestors[index];
+      if (['Program', 'BlockStatement', 'FunctionDeclaration', 'FunctionExpression', 'ArrowFunctionExpression'].includes(scope.type) && scopeBindsName(scope, name)) return true;
+    }
+    return false;
+  };
+  const networkExpression = (node, ancestors = []) => {
+    if (node?.type === 'Identifier') {
+      const shadowedNativeFetch = node.name === 'fetch' && isShadowed(node.name, ancestors);
+      return (!shadowedNativeFetch && networkAliases.has(node.name)) || networkConstructors.has(node.name);
+    }
     if (node?.type === 'CallExpression' && staticPropertyName(node.callee) === 'get' && node.callee.object?.type === 'Identifier' && node.callee.object.name === 'Reflect') {
       return globalPath(node.arguments[0]) !== undefined && staticString(node.arguments[1]) === 'fetch';
     }
     if (node?.type === 'MemberExpression' || node?.type === 'OptionalMemberExpression') {
       const property = staticPropertyName(node);
-      if (property === 'fetch') return globalPath(node.object) !== undefined || networkExpression(node.object);
+      if (property === 'fetch') return globalPath(node.object) !== undefined || networkExpression(node.object, ancestors);
       if (property === 'sendBeacon') return node.object?.type === 'Identifier' && node.object.name === 'navigator';
-      return networkExpression(node.object);
+      return networkExpression(node.object, ancestors);
     }
     return false;
   };
 
-  const walk = (node, visitor) => {
+  const walk = (node, visitor, ancestors = []) => {
     if (!node || typeof node !== 'object') return;
-    if (typeof node.type === 'string') visitor(node);
+    if (typeof node.type === 'string') visitor(node, ancestors);
     for (const [key, value] of Object.entries(node)) {
       if (['loc', 'start', 'end', 'extra', 'errors'].includes(key)) continue;
-      if (Array.isArray(value)) value.forEach((child) => walk(child, visitor));
-      else if (value && typeof value === 'object') walk(value, visitor);
+      if (Array.isArray(value)) value.forEach((child) => walk(child, visitor, [...ancestors, node]));
+      else if (value && typeof value === 'object') walk(value, visitor, [...ancestors, node]);
     }
   };
   const objectHasStyle = (node) => node?.type === 'ObjectExpression' && node.properties.some((property) => property.type === 'ObjectProperty' && (property.key.name ?? property.key.value) === 'style');
 
   walk(root, (node) => {
-    if (node.type === 'FunctionDeclaration' && node.id?.name === 'fetch') shadowedNetworkNames.add('fetch');
     if (node.type === 'ImportDeclaration' && networkModules.has(node.source.value)) {
       node.specifiers.forEach((specifier) => networkAliases.add(specifier.local.name));
       if (!allowNetworkClient) failures.push(`${file}: forbidden network import ${node.source.value} outside approved API client boundary`);
     }
     if (node.type === 'VariableDeclarator' && node.id.type === 'Identifier' && node.init) {
-      if (node.id.name === 'fetch' && ['ArrowFunctionExpression', 'FunctionExpression'].includes(node.init.type)) shadowedNetworkNames.add('fetch');
       if (globalPath(node.init)) globalAliases.add(node.id.name);
       if (networkExpression(node.init)) networkAliases.add(node.id.name);
       if (node.init.type === 'NewExpression' && node.init.callee.type === 'Identifier' && node.init.callee.name === 'DOMParser') domParserAliases.add(node.id.name);
@@ -114,7 +135,7 @@ function analyzeScriptAst(file, source, allowNetworkClient) {
     }
   });
 
-  walk(root, (node) => {
+  walk(root, (node, ancestors) => {
     if ((node.type === 'MemberExpression' || node.type === 'OptionalMemberExpression') && htmlSinks.has(staticPropertyName(node) ?? '')) failures.push(`${file}: forbidden AST HTML sink ${staticPropertyName(node)}`);
     if (node.type === 'CallExpression' || node.type === 'OptionalCallExpression') {
       if (staticPropertyName(node.callee) === 'parseFromString') {
@@ -122,7 +143,7 @@ function analyzeScriptAst(file, source, allowNetworkClient) {
         const isDomParser = receiver?.type === 'NewExpression' && receiver.callee.type === 'Identifier' && receiver.callee.name === 'DOMParser' || receiver?.type === 'Identifier' && domParserAliases.has(receiver.name);
         if (isDomParser) failures.push(`${file}: forbidden DOMParser.parseFromString`);
       }
-      if (!allowNetworkClient && networkExpression(node.callee)) failures.push(`${file}: forbidden AST network client outside approved API client boundary`);
+      if (!allowNetworkClient && networkExpression(node.callee, ancestors)) failures.push(`${file}: forbidden AST network client outside approved API client boundary`);
     }
     if (node.type === 'NewExpression' && !allowNetworkClient && networkExpression(node.callee)) failures.push(`${file}: forbidden AST network constructor outside approved API client boundary`);
     if (node.type === 'AssignmentExpression') {

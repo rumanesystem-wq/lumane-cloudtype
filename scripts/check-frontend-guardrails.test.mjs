@@ -85,6 +85,12 @@ test('allows React JSX event props and approved responsive tokens', () => {
   assert.deepEqual(analyzeSource('safe.ts', "function fetch(key) { return cache.get(key); } fetch('local'); const label = 'axios'; cache.fetch('local')", breakpoints), []);
 });
 
+test('tracks shadowed fetch bindings by lexical scope', () => {
+  assert.deepEqual(analyzeSource('safe.ts', "function helper() { const fetch = () => 'local'; return fetch(); }", breakpoints), []);
+  const failures = analyzeSource('unsafe.ts', "function helper() { const fetch = () => 'local'; return fetch(); } export function load() { return fetch('/api/admin'); }", breakpoints);
+  assert.ok(failures.some((failure) => failure.includes('network client outside approved')));
+});
+
 test('rejects responsive literals absent from DESIGN.md', () => {
   assert.ok(analyzeSource('unsafe.css', '@media (min-width: 500px) {}', breakpoints).some((failure) => failure.includes('500px')));
   assert.ok(analyzeSource('unsafe.css', '@media (max-width: 48rem) {}', breakpoints).some((failure) => failure.includes('exact DESIGN.md')));
