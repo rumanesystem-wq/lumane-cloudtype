@@ -2,7 +2,7 @@
 * { box-sizing: border-box; }
 html { color: var(--colors-on-surface); background: var(--colors-surface-warm); font-family: Pretendard, sans-serif; }
 body { margin: 0; }
-body.has-dialog { overflow: hidden; }
+body.has-dialog, body.has-mobile-menu { overflow: hidden; }
 button, input, textarea, select { font: inherit; }
 button, a, input, textarea, select { min-height: var(--x-accessibility-target-min); }
 :focus-visible { outline: var(--x-accessibility-focus-width) solid var(--colors-primary-strong); outline-offset: var(--x-accessibility-focus-offset); }

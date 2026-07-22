@@ -19,8 +19,7 @@ export function LiveAdmin() {
     event.preventDefault();
     const message = draft.trim();
     if (!message || live.mutating) return;
-    await live.send(message);
-    setDraft('');
+    if (await live.send(message)) setDraft('');
   };
 
   if (live.authState === 'loading') return <Feedback title="관리자 세션 확인 중"><p>잠시만 기다려 주세요.</p></Feedback>;

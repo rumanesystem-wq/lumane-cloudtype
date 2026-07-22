@@ -38,7 +38,7 @@ export function useLiveAdmin() {
     } catch (reason) {
       if (signal?.aborted) return;
       if (reason instanceof AdminApiError && reason.status === 401) {
-        window.location.replace('/admin');
+        window.location.replace('/admin-react');
         return;
       }
       setError(reason instanceof Error ? reason.message : '상담을 불러오지 못했습니다.');
@@ -53,7 +53,7 @@ export function useLiveAdmin() {
       void refresh(controller.signal);
     }).catch((reason) => {
       if (controller.signal.aborted) return;
-      if (reason instanceof AdminApiError && reason.status === 401) window.location.replace('/admin');
+      if (reason instanceof AdminApiError && reason.status === 401) window.location.replace('/admin-react');
       else { setAuthState('error'); setError(reason instanceof Error ? reason.message : '관리자 세션을 확인하지 못했습니다.'); }
     });
     return () => controller.abort();
@@ -83,8 +83,8 @@ export function useLiveAdmin() {
   const runMutation = useCallback(async (action: () => Promise<unknown>) => {
     setMutating(true);
     setError('');
-    try { await action(); await refresh(); }
-    catch (reason) { setError(reason instanceof Error ? reason.message : '요청을 처리하지 못했습니다.'); }
+    try { await action(); await refresh(); return true; }
+    catch (reason) { setError(reason instanceof Error ? reason.message : '요청을 처리하지 못했습니다.'); return false; }
     finally { setMutating(false); }
   }, [refresh]);
 
@@ -93,6 +93,6 @@ export function useLiveAdmin() {
     select: setSelectedId,
     takeover: () => selectedId && runMutation(() => adminApi.takeover(selectedId)),
     release: () => selectedId && runMutation(() => adminApi.release(selectedId)),
-    send: (message: string) => selectedId ? runMutation(() => adminApi.sendMessage(selectedId, message)) : Promise.resolve(),
+    send: (message: string) => selectedId ? runMutation(() => adminApi.sendMessage(selectedId, message)) : Promise.resolve(false),
   };
 }

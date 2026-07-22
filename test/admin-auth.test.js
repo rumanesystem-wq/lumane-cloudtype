@@ -364,9 +364,12 @@ test('browser auth bundles contain no shared bearer credential storage', () => {
 
   const config = fs.readFileSync(path.resolve(__dirname, '..', 'js/admin-config.js'), 'utf8');
   const admin = fs.readFileSync(path.resolve(__dirname, '..', 'js/admin.js'), 'utf8');
+  const login = fs.readFileSync(path.resolve(__dirname, '..', 'js/admin-login.js'), 'utf8');
   assert.match(config, /X-CSRF-Token/);
   assert.match(config, /api\/admin-auth\/logout/);
   assert.match(admin, /60 \* 1000/);
+  assert.match(admin, /window\.location\.hash\.slice\(1\)/);
+  assert.match(login, /pathname\.startsWith\('\/admin-react'\)/);
 });
 
 test('administrator initialization stops when the initial session check fails', () => {

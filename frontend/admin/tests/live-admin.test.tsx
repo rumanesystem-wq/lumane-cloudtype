@@ -49,4 +49,15 @@ describe('LiveAdmin', () => {
     fireEvent.click(screen.getByRole('button', { name: '전송' }));
     await waitFor(() => expect(api.sendMessage).toHaveBeenCalledWith('session-1', '확인했습니다.'));
   });
+
+  it('keeps the reply draft when sending fails', async () => {
+    api.session.mockResolvedValue({ session: { ...detail, mode: 'admin' } });
+    api.sendMessage.mockRejectedValue(new Error('전송 실패'));
+    render(<LiveAdmin />);
+    const reply = await screen.findByLabelText('고객에게 답장');
+    fireEvent.change(reply, { target: { value: '사라지면 안 되는 답장' } });
+    fireEvent.click(screen.getByRole('button', { name: '전송' }));
+    expect(await screen.findByText('전송 실패')).toBeVisible();
+    expect(reply).toHaveValue('사라지면 안 되는 답장');
+  });
 });
