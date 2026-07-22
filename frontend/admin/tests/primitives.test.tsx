@@ -102,6 +102,7 @@ describe('Dialog', () => {
     const input = screen.getByLabelText('메모 내용');
     const close = screen.getByRole('button', { name: '닫기' });
     await waitFor(() => expect(input).toHaveFocus());
+    expect(document.body).toHaveClass('has-dialog');
     trigger.focus();
     await waitFor(() => expect(input).toHaveFocus());
     close.focus();
@@ -109,6 +110,7 @@ describe('Dialog', () => {
     expect(input).toHaveFocus();
     fireEvent.keyDown(dialog, { key: 'Escape' });
     await waitFor(() => expect(trigger).toHaveFocus());
+    expect(document.body).not.toHaveClass('has-dialog');
   });
 
   it('focuses and traps Tab on the dialog container when it has no focusable descendants', async () => {
