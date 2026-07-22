@@ -37,7 +37,9 @@ describe('LiveAdmin', () => {
   });
 
   it('runs takeover and enables replies after the refreshed session enters admin mode', async () => {
-    api.session.mockResolvedValueOnce({ session: detail }).mockResolvedValue({ session: { ...detail, mode: 'admin' } });
+    let adminMode = false;
+    api.session.mockImplementation(() => Promise.resolve({ session: { ...detail, mode: adminMode ? 'admin' : 'ai' } }));
+    api.takeover.mockImplementation(() => { adminMode = true; return Promise.resolve({ ok: true }); });
     render(<LiveAdmin />);
     fireEvent.click(await screen.findByRole('button', { name: '난입하기' }));
     await waitFor(() => expect(api.takeover).toHaveBeenCalledWith('session-1'));
