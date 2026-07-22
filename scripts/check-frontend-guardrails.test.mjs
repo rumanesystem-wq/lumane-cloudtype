@@ -91,6 +91,20 @@ test('tracks shadowed fetch bindings by lexical scope', () => {
   assert.ok(failures.some((failure) => failure.includes('network client outside approved')));
 });
 
+test('distinguishes network aliases and constructors from shadowing bindings', () => {
+  const safeVariants = [
+    "const request = window.fetch; function render(request) { return request('local'); }",
+    "function helper(fetch) { const request = fetch; return request('local'); }",
+    "function helper({ fetch }) { return fetch('local'); }",
+    "try { work(); } catch (fetch) { fetch('local'); }",
+    "for (const fetch of callbacks) fetch('local')",
+    "class WebSocket {} new WebSocket()",
+  ];
+  for (const source of safeVariants) assert.deepEqual(analyzeSource('safe.ts', source, breakpoints), [], source);
+  assert.ok(analyzeSource('unsafe.ts', "const request = window.fetch; request('/api/admin')", breakpoints).some((failure) => failure.includes('network')));
+  assert.ok(analyzeSource('unsafe.ts', "const { fetch: request } = window; request('/api/admin')", breakpoints).some((failure) => failure.includes('network')));
+});
+
 test('rejects responsive literals absent from DESIGN.md', () => {
   assert.ok(analyzeSource('unsafe.css', '@media (min-width: 500px) {}', breakpoints).some((failure) => failure.includes('500px')));
   assert.ok(analyzeSource('unsafe.css', '@media (max-width: 48rem) {}', breakpoints).some((failure) => failure.includes('exact DESIGN.md')));

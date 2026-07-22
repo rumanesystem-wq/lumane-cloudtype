@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import { parse } from '@babel/parser';
+import traverse from '@babel/traverse';
 import YAML from 'yaml';
 
 export const frontendExtensions = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.css', '.html']);
@@ -49,7 +50,6 @@ function staticString(node) {
 function analyzeScriptAst(file, source, allowNetworkClient) {
   const root = parse(source, { sourceType: 'module', plugins: ['typescript', ...(file.endsWith('x') ? ['jsx'] : [])] });
   const globalAliases = new Set(['window', 'globalThis', 'self']);
-  const networkAliases = new Set(['fetch', 'axios', 'ky']);
   const styleObjectAliases = new Set();
   const domParserAliases = new Set();
   const failures = [];
@@ -62,43 +62,6 @@ function analyzeScriptAst(file, source, allowNetworkClient) {
       return base && property ? [...base, property] : undefined;
     }
     return undefined;
-  };
-  const scopeBindsName = (scope, name) => {
-    if (scope.type === 'Program' || scope.type === 'BlockStatement') {
-      return scope.body.some((statement) => {
-        if (statement.type === 'FunctionDeclaration' || statement.type === 'ClassDeclaration') return statement.id?.name === name;
-        if (statement.type !== 'VariableDeclaration') return false;
-        return statement.declarations.some((declaration) => declaration.id.type === 'Identifier' && declaration.id.name === name);
-      });
-    }
-    if (scope.type === 'FunctionDeclaration' || scope.type === 'FunctionExpression' || scope.type === 'ArrowFunctionExpression') {
-      return scope.id?.name === name || scope.params.some((parameter) => parameter.type === 'Identifier' && parameter.name === name)
-        || scope.body.type === 'BlockStatement' && scopeBindsName(scope.body, name);
-    }
-    return false;
-  };
-  const isShadowed = (name, ancestors) => {
-    for (let index = ancestors.length - 1; index >= 0; index -= 1) {
-      const scope = ancestors[index];
-      if (['Program', 'BlockStatement', 'FunctionDeclaration', 'FunctionExpression', 'ArrowFunctionExpression'].includes(scope.type) && scopeBindsName(scope, name)) return true;
-    }
-    return false;
-  };
-  const networkExpression = (node, ancestors = []) => {
-    if (node?.type === 'Identifier') {
-      const shadowedNativeFetch = node.name === 'fetch' && isShadowed(node.name, ancestors);
-      return (!shadowedNativeFetch && networkAliases.has(node.name)) || networkConstructors.has(node.name);
-    }
-    if (node?.type === 'CallExpression' && staticPropertyName(node.callee) === 'get' && node.callee.object?.type === 'Identifier' && node.callee.object.name === 'Reflect') {
-      return globalPath(node.arguments[0]) !== undefined && staticString(node.arguments[1]) === 'fetch';
-    }
-    if (node?.type === 'MemberExpression' || node?.type === 'OptionalMemberExpression') {
-      const property = staticPropertyName(node);
-      if (property === 'fetch') return globalPath(node.object) !== undefined || networkExpression(node.object, ancestors);
-      if (property === 'sendBeacon') return node.object?.type === 'Identifier' && node.object.name === 'navigator';
-      return networkExpression(node.object, ancestors);
-    }
-    return false;
   };
 
   const walk = (node, visitor, ancestors = []) => {
@@ -114,28 +77,20 @@ function analyzeScriptAst(file, source, allowNetworkClient) {
 
   walk(root, (node) => {
     if (node.type === 'ImportDeclaration' && networkModules.has(node.source.value)) {
-      node.specifiers.forEach((specifier) => networkAliases.add(specifier.local.name));
       if (!allowNetworkClient) failures.push(`${file}: forbidden network import ${node.source.value} outside approved API client boundary`);
     }
     if (node.type === 'VariableDeclarator' && node.id.type === 'Identifier' && node.init) {
       if (globalPath(node.init)) globalAliases.add(node.id.name);
-      if (networkExpression(node.init)) networkAliases.add(node.id.name);
       if (node.init.type === 'NewExpression' && node.init.callee.type === 'Identifier' && node.init.callee.name === 'DOMParser') domParserAliases.add(node.id.name);
       const transitiveStyle = node.init.type === 'Identifier' && styleObjectAliases.has(node.init.name) || node.init.type === 'ObjectExpression' && node.init.properties.some((property) => property.type === 'SpreadElement' && property.argument.type === 'Identifier' && styleObjectAliases.has(property.argument.name));
       if (objectHasStyle(node.init) || transitiveStyle) styleObjectAliases.add(node.id.name);
     }
-    if (node.type === 'VariableDeclarator' && node.id.type === 'ObjectPattern' && globalPath(node.init)) {
-      for (const property of node.id.properties) {
-        if (property.type === 'ObjectProperty' && (property.key.name ?? property.key.value) === 'fetch' && property.value.type === 'Identifier') networkAliases.add(property.value.name);
-      }
-    }
     if (node.type === 'AssignmentExpression' && node.left.type === 'Identifier') {
       if (globalPath(node.right)) globalAliases.add(node.left.name);
-      if (networkExpression(node.right)) networkAliases.add(node.left.name);
     }
   });
 
-  walk(root, (node, ancestors) => {
+  walk(root, (node) => {
     if ((node.type === 'MemberExpression' || node.type === 'OptionalMemberExpression') && htmlSinks.has(staticPropertyName(node) ?? '')) failures.push(`${file}: forbidden AST HTML sink ${staticPropertyName(node)}`);
     if (node.type === 'CallExpression' || node.type === 'OptionalCallExpression') {
       if (staticPropertyName(node.callee) === 'parseFromString') {
@@ -143,9 +98,7 @@ function analyzeScriptAst(file, source, allowNetworkClient) {
         const isDomParser = receiver?.type === 'NewExpression' && receiver.callee.type === 'Identifier' && receiver.callee.name === 'DOMParser' || receiver?.type === 'Identifier' && domParserAliases.has(receiver.name);
         if (isDomParser) failures.push(`${file}: forbidden DOMParser.parseFromString`);
       }
-      if (!allowNetworkClient && networkExpression(node.callee, ancestors)) failures.push(`${file}: forbidden AST network client outside approved API client boundary`);
     }
-    if (node.type === 'NewExpression' && !allowNetworkClient && networkExpression(node.callee)) failures.push(`${file}: forbidden AST network constructor outside approved API client boundary`);
     if (node.type === 'AssignmentExpression') {
       const path = globalPath(node.left);
       if (path && path[0] !== 'location') failures.push(`${file}: forbidden AST browser global write`);
@@ -157,6 +110,81 @@ function analyzeScriptAst(file, source, allowNetworkClient) {
       if (unsafeObject || unsafeAlias) failures.push(`${file}: forbidden JSX spread containing style`);
     }
   });
+
+  if (!allowNetworkClient) {
+    const resolvingBindings = new Set();
+    const bindingSource = (binding) => {
+      if (!binding || resolvingBindings.has(binding)) return undefined;
+      resolvingBindings.add(binding);
+      let result;
+      if (binding.path.isImportSpecifier() || binding.path.isImportDefaultSpecifier() || binding.path.isImportNamespaceSpecifier()) {
+        const declaration = binding.path.parentPath;
+        result = declaration.isImportDeclaration() && networkModules.has(declaration.node.source.value) ? 'network' : undefined;
+      } else if (binding.path.isVariableDeclarator()) {
+        const init = binding.path.get('init');
+        const id = binding.path.get('id');
+        if (id.isObjectPattern() && init?.node && isBrowserGlobalPath(init)) {
+          const property = id.get('properties').find((candidate) => candidate.isObjectProperty()
+            && (candidate.node.key.name ?? candidate.node.key.value) === 'fetch'
+            && candidate.get('value').isIdentifier({ name: binding.identifier.name }));
+          if (property) result = 'network';
+        }
+        if (!result && init?.node) result = isNetworkPath(init) ? 'network' : undefined;
+      }
+      if (!result) {
+        for (const violation of binding.constantViolations) {
+          if (violation.isAssignmentExpression() && isNetworkPath(violation.get('right'))) { result = 'network'; break; }
+        }
+      }
+      resolvingBindings.delete(binding);
+      return result;
+    };
+    const isUnboundGlobal = (path, names) => path.isIdentifier() && names.has(path.node.name) && !path.scope.getBinding(path.node.name);
+    const isBrowserGlobalPath = (path) => {
+      if (isUnboundGlobal(path, new Set(['window', 'globalThis', 'self']))) return true;
+      if (!path.isIdentifier()) return false;
+      const binding = path.scope.getBinding(path.node.name);
+      if (!binding || resolvingBindings.has(binding) || !binding.path.isVariableDeclarator()) return false;
+      resolvingBindings.add(binding);
+      const init = binding.path.get('init');
+      const result = Boolean(init?.node && isBrowserGlobalPath(init));
+      resolvingBindings.delete(binding);
+      return result;
+    };
+    function isNetworkPath(path) {
+      if (!path?.node) return false;
+      if (path.isIdentifier()) {
+        const binding = path.scope.getBinding(path.node.name);
+        if (binding) return bindingSource(binding) === 'network';
+        return new Set(['fetch', 'axios', 'ky', ...networkConstructors]).has(path.node.name);
+      }
+      if (path.isCallExpression() && staticPropertyName(path.node.callee) === 'get') {
+        const callee = path.get('callee');
+        const args = path.get('arguments');
+        return callee.get('object').isIdentifier({ name: 'Reflect' }) && !callee.scope.getBinding('Reflect')
+          && isBrowserGlobalPath(args[0]) && staticString(args[1]?.node) === 'fetch';
+      }
+      if (path.isMemberExpression() || path.isOptionalMemberExpression()) {
+        const property = staticPropertyName(path.node);
+        const object = path.get('object');
+        if (property === 'fetch') return isBrowserGlobalPath(object) || isNetworkPath(object);
+        if (property === 'sendBeacon') return isUnboundGlobal(object, new Set(['navigator']));
+        return isNetworkPath(object);
+      }
+      return false;
+    }
+    traverse(root, {
+      CallExpression(path) {
+        if (isNetworkPath(path.get('callee'))) failures.push(`${file}: forbidden AST network client outside approved API client boundary`);
+      },
+      OptionalCallExpression(path) {
+        if (isNetworkPath(path.get('callee'))) failures.push(`${file}: forbidden AST network client outside approved API client boundary`);
+      },
+      NewExpression(path) {
+        if (isNetworkPath(path.get('callee'))) failures.push(`${file}: forbidden AST network constructor outside approved API client boundary`);
+      },
+    });
+  }
   return failures;
 }
 

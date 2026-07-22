@@ -1,6 +1,8 @@
 import { useEffect, useId, useRef, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 
 const focusableSelector = 'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])';
+const dialogStack: symbol[] = [];
 
 function isUsableFocusTarget(target: HTMLElement | null | undefined, container: HTMLElement) {
   if (!target || !container.contains(target) || !target.matches(focusableSelector) || target.tabIndex < 0 || target.hidden || target.getAttribute('aria-hidden') === 'true') return false;
@@ -24,9 +26,15 @@ export function Dialog({ children, initialFocusRef, onClose, open, title }: { ch
   const titleId = useId();
   const containerRef = useRef<HTMLDivElement>(null);
   const restoreRef = useRef<HTMLElement | null>(null);
+  const dialogIdRef = useRef(Symbol('dialog'));
+  const portalNodeRef = useRef(document.createElement('div'));
 
   useEffect(() => {
     if (!open) return;
+    const dialogId = dialogIdRef.current;
+    const portalNode = portalNodeRef.current;
+    document.body.append(portalNode);
+    dialogStack.push(dialogId);
     restoreRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const focusInside = () => {
       const container = containerRef.current;
@@ -37,12 +45,15 @@ export function Dialog({ children, initialFocusRef, onClose, open, title }: { ch
     };
     focusInside();
     const containFocus = (event: FocusEvent) => {
-      if (containerRef.current && event.target instanceof Node && !containerRef.current.contains(event.target)) focusInside();
+      if (dialogStack.at(-1) === dialogId && containerRef.current && event.target instanceof Node && !containerRef.current.contains(event.target)) focusInside();
     };
     document.addEventListener('focusin', containFocus);
     return () => {
       document.removeEventListener('focusin', containFocus);
+      const stackIndex = dialogStack.lastIndexOf(dialogId);
+      if (stackIndex !== -1) dialogStack.splice(stackIndex, 1);
       restoreRef.current?.focus();
+      portalNode.remove();
     };
   }, [initialFocusRef, open]);
 
@@ -70,12 +81,13 @@ export function Dialog({ children, initialFocusRef, onClose, open, title }: { ch
       first.focus();
     }
   };
-  return (
+  return createPortal(
     <div className="dialog-backdrop">
       <div ref={containerRef} className="dialog" role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} onKeyDown={handleKeyDown}>
         <h2 id={titleId}>{title}</h2>
         {children}
       </div>
-    </div>
+    </div>,
+    portalNodeRef.current,
   );
 }

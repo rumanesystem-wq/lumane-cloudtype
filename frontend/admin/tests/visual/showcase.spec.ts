@@ -22,6 +22,13 @@ async function waitForStableDocumentHeight(page: Page, minimumHeight: number) {
   throw new Error(`Document height did not stabilize above ${minimumHeight}px.`);
 }
 
+test('320px reflow does not create horizontal page overflow', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 800 });
+  await page.goto('/');
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  expect(overflow).toBeLessThanOrEqual(0);
+});
+
 for (const viewport of viewports) {
   test(`${viewport.name}px viewport passes interaction and visual checks`, async ({ page }, testInfo) => {
     await page.setViewportSize(viewport);

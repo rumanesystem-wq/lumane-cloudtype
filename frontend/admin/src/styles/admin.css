@@ -1,7 +1,7 @@
 @font-face { font-family: Pretendard; font-style: normal; font-display: swap; font-weight: 400; src: url('@fontsource/pretendard/files/pretendard-latin-400-normal.woff2') format('woff2'); }
 * { box-sizing: border-box; }
 html { color: var(--colors-on-surface); background: var(--colors-surface-warm); font-family: Pretendard, sans-serif; }
-body { margin: 0; min-width: var(--x-breakpoints-compact); }
+body { margin: 0; }
 button, input, textarea, select { font: inherit; }
 button, a, input, textarea, select { min-height: var(--x-accessibility-target-min); }
 :focus-visible { outline: var(--x-accessibility-focus-width) solid var(--colors-primary-strong); outline-offset: var(--x-accessibility-focus-offset); }

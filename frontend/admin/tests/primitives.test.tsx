@@ -64,6 +64,14 @@ describe('Form primitives', () => {
     expect(select).toHaveAttribute('aria-invalid', 'true');
   });
 
+  it('merges caller-provided ARIA relationships and invalid state', () => {
+    render(<><span id="external-help">외부 도움말</span><FormField label="카드" aria-describedby="external-help" description="내부 도움말" aria-invalid="spelling" /><TextareaField label="메모" aria-describedby="external-help" /><SelectField label="상태" aria-invalid><option>선택</option></SelectField></>);
+    expect(screen.getByLabelText('카드')).toHaveAccessibleDescription('외부 도움말 내부 도움말');
+    expect(screen.getByLabelText('카드')).toHaveAttribute('aria-invalid', 'spelling');
+    expect(screen.getByLabelText('메모')).toHaveAttribute('aria-describedby', 'external-help');
+    expect(screen.getByLabelText('상태')).toHaveAttribute('aria-invalid', 'true');
+  });
+
   it('allows the error summary to receive programmatic focus', () => {
     const summaryRef = createRef<HTMLElement>();
     const fieldRef = createRef<HTMLInputElement>();
@@ -170,6 +178,26 @@ describe('Dialog', () => {
     fireEvent.keyDown(icon, { key: 'Escape' });
     await waitFor(() => expect(screen.queryByRole('dialog', { name: '도구' })).not.toBeInTheDocument());
     expect(trigger).toHaveFocus();
+  });
+
+  it('traps focus only in the topmost dialog', async () => {
+    render(<><Dialog open onClose={() => undefined} title="아래 대화상자"><button>아래 동작</button></Dialog><Dialog open onClose={() => undefined} title="위 대화상자"><button>위 동작</button></Dialog></>);
+    const topAction = screen.getByRole('button', { name: '위 동작' });
+    await waitFor(() => expect(topAction).toHaveFocus());
+    screen.getByRole('button', { name: '아래 동작' }).focus();
+    await waitFor(() => expect(topAction).toHaveFocus());
+  });
+
+  it('keeps the most recently opened dialog visually and logically on top', async () => {
+    function StackedDialogFixture() {
+      const [openLower, setOpenLower] = useState(false);
+      return <><button onClick={() => setOpenLower(true)}>아래 대화상자 열기</button><Dialog open={openLower} onClose={() => setOpenLower(false)} title="나중에 연 대화상자"><button>나중 동작</button></Dialog><Dialog open onClose={() => undefined} title="먼저 연 대화상자"><button>먼저 동작</button></Dialog></>;
+    }
+    render(<StackedDialogFixture />);
+    fireEvent.click(screen.getByRole('button', { name: '아래 대화상자 열기' }));
+    const backdrops = document.body.querySelectorAll('.dialog-backdrop');
+    expect(backdrops[backdrops.length - 1]).toHaveTextContent('나중에 연 대화상자');
+    await waitFor(() => expect(screen.getByRole('button', { name: '나중 동작' })).toHaveFocus());
   });
 });
 
