@@ -790,8 +790,11 @@ const _serveHtml = (file) => (req, res) => {
 app.get('/',           _serveHtml('index.html'));
 app.get('/index.html', _serveHtml('index.html'));
 const _serveAdminPage = createAdminPageHandler({ adminAuth, rootDir: __dirname });
+const _serveReactAdminPage = createAdminPageHandler({ adminAuth, rootDir: __dirname, adminFile: 'dist/admin/index.html' });
 app.get('/admin',      _serveAdminPage);
 app.get('/admin.html', _serveAdminPage);
+app.get('/admin-react', _serveReactAdminPage);
+app.get('/admin-react/', _serveReactAdminPage);
 app.get('/admin-login.html', _serveHtml('admin-login.html'));
 app.get('/chat',       _serveHtml('chat.html'));
 app.get('/chat.html',  _serveHtml('chat.html'));
@@ -818,6 +821,7 @@ app.use('/css',          express.static(path.join(__dirname, 'css'),          _s
 app.use('/js',           express.static(path.join(__dirname, 'js'),           _staticOpts));
 app.use('/images',       express.static(path.join(__dirname, 'images'),       _staticOpts));
 app.use('/preview_site', express.static(path.join(__dirname, 'preview_site'), _staticOpts));
+app.use('/admin-react/assets', express.static(path.join(__dirname, 'dist', 'admin', 'assets'), _staticOpts));
 app.get('/floorplan_preview.html', _serveHtml('floorplan_preview.html'));
 
 // ── 헬스 체크 ─────────────────────────────────────────────────
