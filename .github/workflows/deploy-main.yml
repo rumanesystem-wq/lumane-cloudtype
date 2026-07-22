@@ -24,8 +24,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Run tests
-        run: npm test
+      - name: Run server tests
+        run: npm run test:server
+
+      - name: Verify frontend
+        run: npm run frontend:verify
 
       - name: Check server syntax
         run: node --check server.js
