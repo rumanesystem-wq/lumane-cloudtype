@@ -70,6 +70,20 @@ dd { margin: 0; font-weight: var(--typography-label-fontweight); }
 .dialog__actions { justify-content: flex-end; margin-top: var(--spacing-lg); }
 .toast-region { position: fixed; right: var(--spacing-md); bottom: var(--spacing-md); z-index: 10; width: min(var(--x-layout-toast-max), calc(100% - var(--spacing-xl))); }
 .toast { border: var(--x-borders-strong); border-radius: var(--rounded-sm); padding: var(--spacing-control) var(--spacing-md); color: var(--colors-surface); background: var(--colors-on-surface); box-shadow: var(--x-shadows-floating); }
+.empty-copy, .empty-panel { color: var(--colors-on-surface-muted); }
+.empty-panel { min-height: var(--x-layout-feedback-min); }
+.live-detail { min-width: 0; }
+.live-messages { display: flex; min-height: var(--x-layout-feedback-min); max-height: calc(var(--x-layout-dynamic-viewport-height) - var(--spacing-5xl)); flex-direction: column; gap: var(--spacing-sm); overflow-y: auto; border: var(--x-borders-default); border-radius: var(--rounded-sm); padding: var(--spacing-md); background: var(--colors-surface-warm); }
+.live-message { max-width: min(var(--x-layout-dialog-max), 88%); border: var(--x-borders-default); border-radius: var(--rounded-sm); padding: var(--spacing-control); background: var(--colors-surface); }
+.live-message--customer { align-self: flex-end; border-color: var(--colors-primary); background: var(--colors-primary-soft); }
+.live-message--admin { border-color: var(--colors-primary-strong); }
+.live-message strong, .live-message time { display: block; font-size: var(--typography-caption-fontsize); }
+.live-message p { margin: var(--spacing-xs) 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.live-message time { color: var(--colors-on-surface-muted); }
+.live-composer { display: grid; grid-template-columns: var(--x-layout-one-column); gap: var(--spacing-xs); margin-top: var(--spacing-md); }
+.live-composer label { font-weight: var(--typography-label-fontweight); }
+.live-composer textarea { width: 100%; border: var(--x-borders-default); border-radius: var(--rounded-sm); padding: var(--spacing-control); resize: vertical; }
+.live-composer .button { justify-self: end; }
 @media (max-width: 768px) {
   .navigation { overflow-x: auto; }
   .navigation a { flex: none; }

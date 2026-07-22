@@ -4,7 +4,7 @@ import path from 'node:path';
 
 export default defineConfig({
   root: path.resolve(import.meta.dirname),
-  base: './',
+  base: '/admin-react/',
   plugins: [react()],
   build: {
     outDir: path.resolve(import.meta.dirname, '../../dist/admin'),
