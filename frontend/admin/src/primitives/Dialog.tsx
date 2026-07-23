@@ -34,6 +34,7 @@ export function Dialog({ children, initialFocusRef, onClose, open, title }: { ch
     const dialogId = dialogIdRef.current;
     const portalNode = portalNodeRef.current;
     document.body.append(portalNode);
+    if (dialogStack.length === 0) document.body.classList.add('has-dialog');
     dialogStack.push(dialogId);
     restoreRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const focusInside = () => {
@@ -52,6 +53,7 @@ export function Dialog({ children, initialFocusRef, onClose, open, title }: { ch
       document.removeEventListener('focusin', containFocus);
       const stackIndex = dialogStack.lastIndexOf(dialogId);
       if (stackIndex !== -1) dialogStack.splice(stackIndex, 1);
+      if (dialogStack.length === 0) document.body.classList.remove('has-dialog');
       restoreRef.current?.focus();
       portalNode.remove();
     };

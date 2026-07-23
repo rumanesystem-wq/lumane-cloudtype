@@ -364,9 +364,12 @@ test('browser auth bundles contain no shared bearer credential storage', () => {
 
   const config = fs.readFileSync(path.resolve(__dirname, '..', 'js/admin-config.js'), 'utf8');
   const admin = fs.readFileSync(path.resolve(__dirname, '..', 'js/admin.js'), 'utf8');
+  const login = fs.readFileSync(path.resolve(__dirname, '..', 'js/admin-login.js'), 'utf8');
   assert.match(config, /X-CSRF-Token/);
   assert.match(config, /api\/admin-auth\/logout/);
   assert.match(admin, /60 \* 1000/);
+  assert.match(admin, /window\.location\.hash\.slice\(1\)/);
+  assert.match(login, /pathname\.startsWith\('\/admin-react'\)/);
 });
 
 test('administrator initialization stops when the initial session check fails', () => {
@@ -381,4 +384,14 @@ test('administrator initialization stops when the initial session check fails', 
   assert.match(admin, /const authenticated = await verifyAdminSession\(\);\s*if \(!authenticated\) return;\s*\n\s*await checkServer\(\);/);
   assert.match(admin, /adminSessionTimer = setInterval\(verifyAdminSession, 60 \* 1000\)/);
   assert.doesNotMatch(dashboard, /DOMContentLoaded[^\n]*prewarmSourceStats/);
+});
+
+test('React administrator route preserves the existing authenticated page boundary', () => {
+  const root = path.resolve(__dirname, '..');
+  const server = fs.readFileSync(path.join(root, 'server.js'), 'utf8');
+  const packageJson = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
+  assert.match(server, /createAdminPageHandler\(\{ adminAuth, rootDir: __dirname, adminFile: 'dist\/admin\/index\.html' \}\)/);
+  assert.match(server, /app\.get\('\/admin-react', _serveReactAdminPage\)/);
+  assert.match(server, /app\.use\('\/admin-react\/assets', express\.static/);
+  assert.match(packageJson.scripts.start, /frontend:build/);
 });

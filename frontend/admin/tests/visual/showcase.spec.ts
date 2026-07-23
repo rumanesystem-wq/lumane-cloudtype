@@ -24,7 +24,7 @@ async function waitForStableDocumentHeight(page: Page, minimumHeight: number) {
 
 test('320px reflow does not create horizontal page overflow', async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 800 });
-  await page.goto('/');
+  await page.goto('/?showcase=1');
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(overflow).toBeLessThanOrEqual(0);
 });
@@ -33,7 +33,7 @@ for (const viewport of viewports) {
   test(`${viewport.name}px viewport passes interaction and visual checks`, async ({ page }, testInfo) => {
     await page.setViewportSize(viewport);
     await page.emulateMedia({ reducedMotion: 'reduce' });
-    await page.goto('/');
+    await page.goto('/?showcase=1');
     await page.evaluate(() => document.fonts.ready);
 
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);

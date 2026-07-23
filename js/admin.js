@@ -758,6 +758,14 @@ function switchTab(tab) {
   }
 }
 
+function openRequestedAdminTab() {
+  const requestedTab = window.location.hash.slice(1);
+  const linkableTabs = new Set(['quotes', 'visitor-stats', 'tokens', 'trash', 'backup', 'live', 'history']);
+  if (linkableTabs.has(requestedTab) && document.getElementById(`tab-${requestedTab}`)) {
+    switchTab(requestedTab);
+  }
+}
+
 let _tokenPeriod = 'all';
 
 function setTokenPeriod(period) {
@@ -1209,6 +1217,7 @@ async function initializeAdminApp() {
 
   await checkServer();
   if (!isAdminAuthActive()) return;
+  openRequestedAdminTab();
   startBgPolling();
   prewarmSourceStats();
   adminHealthTimer = setInterval(checkServer, 30000);

@@ -29,7 +29,8 @@ form.addEventListener('submit', async event => {
       }),
     });
     if (!response.ok) throw new Error('login failed');
-    window.location.replace('/admin');
+    const destination = window.location.pathname.startsWith('/admin-react') ? '/admin-react' : `/admin${window.location.hash}`;
+    window.location.replace(destination);
   } catch {
     error.textContent = '로그인할 수 없습니다. 이메일과 비밀번호를 확인해 주세요.';
     setLoading(false);

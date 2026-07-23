@@ -4,7 +4,7 @@
   "description": "케이트블랑 루마네 AI 상담 서버",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
+    "start": "npm run frontend:build && node server.js",
     "design:lint": "designmd lint DESIGN.md",
     "design:tokens": "node scripts/generate-design-tokens.mjs",
     "design:tokens:check": "node scripts/generate-design-tokens.mjs --check",
