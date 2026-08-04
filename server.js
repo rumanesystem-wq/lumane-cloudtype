@@ -31,6 +31,7 @@ const {
   recoverRuntimeState,
 } = require('./lib/session-recovery');
 const { insertIdempotentQuote } = require('./lib/quote-storage');
+const { runOptionalSync } = require('./lib/optional-sync');
 const { createAdminAuth, createAdminPageHandler } = require('./lib/admin-auth');
 const {
   assertSafeExternalUrl,
@@ -546,16 +547,10 @@ async function autoRegisterQuote(sess, reply) {
     notifySlack('AI견적등록', '🤖', parts.join(' / '));
   }
 
-  // customer 스키마 저장 (이름+전화 모두 있을 때만)
+  // customer 설치 접수 연동 (견적 저장의 선택적 후속 작업)
   if (name && phone) {
-    try {
+    await runOptionalSync(async () => {
       const now = new Date().toISOString();
-      await executeSupabase('AI customer upsert', () =>
-        supabaseCustomer.from('customer').upsert(
-          { name, phone, saved_at: now, last_changed_at: now },
-          { onConflict: 'phone' }
-        )
-      );
       if (!sess.customerInstallSaved) {
         await executeSupabase('AI customer.install upsert', () => supabaseCustomer.from('install').upsert([{
           name,
@@ -578,10 +573,10 @@ async function autoRegisterQuote(sess, reply) {
       } else {
         console.log(`customer.install 이미 저장됨, 건너뜀 (AI상담): ${quoteNumber}`);
       }
-    } catch (custErr) {
+    }, custErr => {
       console.error('customer 스키마 저장 오류 (quotes는 저장됨):', custErr.message);
-      throw custErr;
-    }
+      notifySlack('고객DB연동실패', '💾', `ctx=AI_QUOTE name=${custErr.name || '?'} code=${custErr.code || '?'}\nerr=${custErr.message}`);
+    });
   }
 }
 
@@ -2916,16 +2911,10 @@ app.post('/api/quote', chatRateLimit, async (req, res) => {
       notifySlack('주문폼접수', '💰', parts.join(' / '));
     }
 
-    // customer 스키마 동시 저장 (phone 있을 때만)
+    // customer 설치 접수 연동 (견적 저장의 선택적 후속 작업)
     if (payload.phone) {
-      try {
+      await runOptionalSync(async () => {
         const now = new Date().toISOString();
-        await executeSupabase('form customer upsert', () =>
-          supabaseCustomer.from('customer').upsert(
-            { name: payload.name, phone: payload.phone, saved_at: now, last_changed_at: now },
-            { onConflict: 'phone' }
-          )
-        );
         await executeSupabase('form customer.install upsert', () => supabaseCustomer.from('install').upsert([{
           name:             payload.name,
           phone:            payload.phone,
@@ -2946,10 +2935,10 @@ app.post('/api/quote', chatRateLimit, async (req, res) => {
           source_ref:       payload.quote_number,
         }], { onConflict: 'source_ref' }));
         console.log(`✅ customer 스키마 저장 (폼제출): ${payload.quote_number}`);
-      } catch (custErr) {
+      }, custErr => {
         console.error('customer 스키마 저장 오류 (quotes는 저장됨):', custErr.message);
-        throw custErr;
-      }
+        notifySlack('고객DB연동실패', '💾', `ctx=QUOTE_FORM_CUSTOMER name=${custErr.name || '?'} code=${custErr.code || '?'}\nerr=${custErr.message}`);
+      });
     } else {
       console.log('customer 스키마 저장 건너뜀 (phone 없음)');
     }
