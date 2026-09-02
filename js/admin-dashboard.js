@@ -211,7 +211,7 @@ async function fetchDashboardConversations() {
     const res = await adminFetch(`${SERVER}/api/admin/conversations`, { headers: adminHeaders() });
     if (!res.ok) return;
     const data = await res.json();
-    setCachedConversations((data.conversations || []).slice(0, 30));
+    setCachedConversations(data.conversations || []);
     _refreshDashBadge();
     _checkConvNotifications();
     renderDashboardSessions(_cachedLiveSessions);
